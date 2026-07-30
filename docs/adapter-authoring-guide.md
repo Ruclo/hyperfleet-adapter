@@ -1767,12 +1767,25 @@ clients:
    broker:
      type: rabbitmq
      rabbitmq:
-       url: "amqp://user:pass@rabbitmq:5672/"
+       url: "amqp://<user>:<password>@rabbitmq.<rabbitmq-namespace>.svc.cluster.local:5672/<vhost>" # namespace is where RabbitMQ is deployed
        exchange: "hyperfleet-clusters"   # must match sentinel's clients.broker.topic
        exchange_type: "topic"
    ```
 
 1. **Deploy using the Helm chart** — the generic `adapter/` chart mounts your task config as a ConfigMap and sets the environment variables.
+
+   ```bash
+   helm install my-adapter oci://quay.io/redhat-services-prod/hyperfleet-tenant/hyperfleet/hyperfleet-adapter-chart \
+     --namespace my-adapter-namespace \
+     --create-namespace \
+     -f my-values.yaml \
+     --set broker.type=rabbitmq \
+     --set broker.rabbitmq.url="amqp://<user>:<password>@rabbitmq.<rabbitmq-namespace>.svc.cluster.local:5672/<vhost>" \
+     --set broker.rabbitmq.exchange="hyperfleet-clusters" \
+     --set-file adapterTaskConfig.external.task-config=./my-task-config.yaml
+   ```
+
+   Where `my-values.yaml` contains image and adapter config (see [Deployment Guide](deployment.md) for full values reference).
 
 2. **Set up broker subscription** — for Google Pub/Sub, ensure your adapter has a dedicated subscription on the cluster events topic so it receives events independently of other adapters (fan-out pattern). For RabbitMQ, fan-out is achieved automatically by giving each adapter a unique `subscription_id` — the broker library creates a separate queue per adapter.
 
