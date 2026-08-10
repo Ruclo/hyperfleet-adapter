@@ -275,8 +275,8 @@ github.com/openshift-hyperfleet/hyperfleet-broker v1.1.1 h1:3zbpNuFL+OEvKl6a/KJA
 github.com/openshift-hyperfleet/hyperfleet-broker v1.1.1/go.mod h1:E7Br4NnsaTTfWR2fEqHAtvFXUAgzFpksF+G5qTBMmy0=
 github.com/openshift-online/maestro v0.0.0-20260202062555-48b47506a254 h1:v/jYqdzZpzB/bscVpajlbcKgCNeV4tx4fkm5m2JR8Ug=
 github.com/openshift-online/maestro v0.0.0-20260202062555-48b47506a254/go.mod h1:cyeif610uObNrbcyn5s1fZg7OWseVjaMAqgrEDA2Aec=
-github.com/openshift-online/ocm-sdk-go v0.1.507 h1:3sv+blhiIRlgJVpGGnFeFQ1aQNZ2HIMSiTfOo8Chmug=
-github.com/openshift-online/ocm-sdk-go v0.1.507/go.mod h1:6HRHFFcP71rXkTvcexoikR/kZUk4MYCl505THEIuZkI=
+github.com/openshift-online/ocm-sdk-go v0.1.508 h1:eQSaJyGk+r7mcQL5xJVNuVy5MTN5QG5IDfDvYScdX/4=
+github.com/openshift-online/ocm-sdk-go v0.1.508/go.mod h1:BJ51ovfTSjRPLSowGivPeqCez/zp8Vo0PWll3FLSHy0=
 github.com/pelletier/go-toml/v2 v2.4.2 h1:M2fKKbmyvI+hGId/D0W64qDBMVhJnNR10O5gIbMc//Q=
 github.com/pelletier/go-toml/v2 v2.4.2/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
 github.com/pingcap/errors v0.11.4 h1:lFuQV/oaUMGcD2tqt+01ROSmJs75VG1ToEOkZIZ4nE4=
