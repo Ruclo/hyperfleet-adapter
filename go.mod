@@ -7,11 +7,11 @@ require (
 	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/go-viper/mapstructure/v2 v2.5.0
-	github.com/google/cel-go v0.30.0
+	github.com/google/cel-go v0.31.0
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/openshift-hyperfleet/hyperfleet-broker v1.1.1
 	github.com/openshift-online/maestro v0.0.0-20260202062555-48b47506a254
-	github.com/openshift-online/ocm-sdk-go v0.1.508
+	github.com/openshift-online/ocm-sdk-go v0.1.509
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.2
 	github.com/spf13/cobra v1.10.2
@@ -26,7 +26,7 @@ require (
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0
 	go.opentelemetry.io/otel/sdk v1.45.0
 	go.opentelemetry.io/otel/trace v1.45.0
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.41.0
 	google.golang.org/grpc v1.83.0
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/apimachinery v0.36.3
