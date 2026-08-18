@@ -736,6 +736,98 @@ status:
     ? "True" : "False"
 ```
 
+#### Desire transport (remote reads)
+
+The **desire transport** delivers resources by recording declarative intent into a backend store rather than applying directly. Instead of writing to a cluster's API server, the adapter records an *apply desire* — the intent for the resource — into the store. The [applier](https://github.com/openshift-hyperfleet/hyperfleet-applier) reconciles that desire against the backend, and the resulting live object is mirrored back through a *read desire* that discovery consumes.
+
+```yaml
+resources:
+  - name: "remoteConfig"
+    transport:                       # NOTE: the "desire" transport shape lands with HYPERFLEET-1440/1441
+      client: "desire"               # Config syntax to be finalized
+    manifest:
+      # ... standard manifest; discovery reads the mirrored live object
+    discovery:
+      by_name: "{{ .clusterId }}-config"
+```
+
+For desire-transport resources, discovery returns the **full live object** mirrored through the read desire — status and all — landing in `resources.<name>` with the same shape a locally discovered object would have. You write CEL against it exactly as you would for a Kubernetes-direct resource; no `statusFeedback` traversal or feedback rules are involved.
+
+> The desire transport, its generation tracking, and full-object discovery land with HYPERFLEET-1440 and HYPERFLEET-1441. This section documents the contract adapter authors write against, not the wiring.
+
+### The eventual-consistency contract for remote reads
+
+Remote reads through the desire path are **eventually consistent**. The object you read is not a live query against the backend — it is the last state the applier mirrored back. This section states what you can rely on when writing CEL against a desire-transport resource.
+
+#### Reads return the last mirrored state, not a live query
+
+When discovery reads a desire-transport resource, it returns the object as of the last time the applier mirrored it — not the state at the instant of reads. There is a lag between the moment you record an apply desire and the moment the read-desire mirror reflects the applier's work. During that window, discovery returns the *previous* mirrored state, or nothing at all if the resource has never synced.
+
+Treat every remote read as **potentially stale**. Do not assume a change you just applied is visible on the next line of CEL.
+
+#### Staleness is a generation mismatch, and the framework re-queues
+
+The `hyperfleet.io/generation` annotation is written once on the manifest and **round-trips through the mirror** into the mirrored live object. This is the staleness signal:
+
+- When the generation on the mirrored object **matches** the generation you applied, the mirror is current — the applier has caught up with your intent.
+- When they **differ**, the mirror is stale — the applier has not yet reconciled your latest apply desire.
+
+On a generation mismatch the framework **re-queues the event rather than blocking** on a live read. Your adapter does not wait in-line for the backend to converge; it reports what it can and the reconciliation loop runs again once the mirror advances. Design your status conditions to say *"not converged yet"* on a mismatch instead of treating it as a failure.
+
+```mermaid
+sequenceDiagram
+    participant Adapter
+    participant Store as Desire store
+    participant Applier
+    participant Mirror as Read-desire mirror
+
+    Adapter->>Store: record apply desire (generation N+1)
+    Adapter->>Mirror: discover → still shows generation N
+    Note over Adapter: generation mismatch → re-queue, don't block
+    Applier->>Store: reconcile desire
+    Applier->>Mirror: mirror live object (generation N+1)
+    Note over Adapter: next reconcile: mirror matches → converged
+```
+
+#### Not-synced-yet and not-found are distinct outcomes
+
+Three states are distinguishable downstream, and they mean different things:
+
+| State | Meaning | What it tells the author |
+|-------|---------|--------------------------|
+| **Not synced yet** | The resource was requested but the mirror has not populated it (no read desire yet, or mirror lag) | Transient. The applier has not caught up — expect convergence on a later reconcile |
+| **Present** | The mirror holds the live object | Read its fields; check the mirrored generation before trusting freshness |
+| **Not found** | The resource is confirmed gone (deleted-resource sentinel) | Terminal for this resource — it does not exist, do not wait for it |
+
+The critical distinction is **not-synced-yet vs. not-found**: an absent mirror ("I have not seen it yet") is not the same as a confirmed-gone resource ("it does not exist"). Reporting `Ready=False` because a mirror has not synced is a bug — the resource may be seconds from appearing. Reporting it because the resource is confirmed gone is correct.
+
+#### Writing CEL against remote reads
+
+Use optional access so a not-yet-synced mirror does not error your expression, and gate "ready" on both presence **and** a matching generation:
+
+```cel
+// Present AND current: the mirror holds the object and it reflects this generation
+resources.?remoteConfig.hasValue()
+  && resources.remoteConfig.metadata.annotations["hyperfleet.io/generation"] == string(generation)
+
+// Not synced yet — absent mirror, treat as transient (Unknown), never as failure
+!resources.?remoteConfig.hasValue()
+  ? "Unknown"
+  : resources.?remoteConfig.?status.?conditions.orValue([])
+      .exists(c, c.type == "Ready" && c.status == "True")
+    ? "True" : "False"
+```
+
+> Until the not-synced-yet vs. not-found sentinel lands (HYPERFLEET-1440), `!hasValue()` alone cannot separate a mirror that has not synced from a resource that is confirmed gone — both read as absent. Treat absence as `"Unknown"` only where a confirmed-deleted resource is also acceptable as `"Unknown"`; otherwise defer the terminal-vs-transient decision to that sentinel once it exists.
+
+Guidance for status conditions:
+
+- Default a remote-backed condition to `"Unknown"` while the mirror is absent — it is not evidence of failure.
+- Only trust a mirrored object's status once its `hyperfleet.io/generation` matches the `generation` you applied; otherwise you are reading a stale snapshot.
+- Reserve `"False"`/failure for a confirmed-gone resource or an actual bad status on a current mirror, never for staleness.
+
+> **See also:** [ADR-0015 — Eventual consistency for the read path](https://github.com/openshift-hyperfleet/architecture/blob/main/hyperfleet/adrs/0015-eventual-consistency-for-read-path.md) for general background on the API read path (transaction-free GET/LIST reads and polling mitigation). It does not define the desire transport, the read-desire mirror, generation matching, or the framework re-queue behavior described above — those land with HYPERFLEET-1440/1441.
+
 ### Conditional creation (lifecycle.create)
 
 Resources can gate their **initial creation** on a CEL expression using the `lifecycle.create` block. This lets you apply a resource only once some runtime condition holds (a feature flag param, a sibling resource's discovered state, an event payload field) without blocking the rest of the resources phase — unlike preconditions, which are all-or-nothing for the entire phase.
