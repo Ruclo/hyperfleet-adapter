@@ -3,11 +3,11 @@ module github.com/openshift-hyperfleet/hyperfleet-adapter
 go 1.26.0
 
 require (
+	cel.dev/cel-go v0.32.0
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/cloudevents/sdk-go/v2 v2.16.2
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/go-viper/mapstructure/v2 v2.5.0
-	github.com/google/cel-go v0.31.0
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/openshift-hyperfleet/hyperfleet-broker v1.1.1
 	github.com/openshift-online/maestro v0.0.0-20260202062555-48b47506a254
