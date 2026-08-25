@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
+	"cel.dev/cel-go/cel"
 	"github.com/Masterminds/semver/v3"
-	"github.com/google/cel-go/cel"
 
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/criteria"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/manifest"
