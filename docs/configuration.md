@@ -64,6 +64,7 @@ clients:
       X-Example: "value"
     auth:
       token_path: "/var/run/secrets/hyperfleet/token"
+      scheme: "Bearer"
       token_cache_ttl: "30s"
   broker:
     subscription_id: "example-subscription"
@@ -115,7 +116,8 @@ clients:
 - `base_delay` (duration string): Initial retry delay. Default: `1s`.
 - `max_delay` (duration string): Maximum retry delay. Default: `30s`.
 - `default_headers` (map[string]string): Headers added to all API requests.
-- `auth.token_path` (string): Absolute path to a file containing a JWT bearer token. When set, the token is read from this file and attached as `Authorization: Bearer <token>` on every request. Typically a Kubernetes projected ServiceAccount token. Must be an absolute path.
+- `auth.token_path` (string): Absolute path to a file containing a service account token. When set, the token is read from this file and attached as `Authorization: <scheme> <token>` on every request. Typically a Kubernetes projected service account token. Must be an absolute path.
+- `auth.scheme` (string): Authorization header scheme used when sending the token. Defaults to `Bearer`. Set to `ServiceAccount` when fronted by a gateway that differentiates human-jwt callers from machine callers.
 - `auth.token_cache_ttl` (duration string): How long the token is cached in memory before re-reading the file. Zero (default) means re-read on every request.
 
 ### Broker (`clients.broker`)
@@ -293,6 +295,7 @@ All deployment overrides use the `HYPERFLEET_` prefix unless noted.
 - `HYPERFLEET_API_BASE_DELAY` -> `clients.hyperfleet_api.base_delay`
 - `HYPERFLEET_API_MAX_DELAY` -> `clients.hyperfleet_api.max_delay`
 - `HYPERFLEET_API_AUTH_TOKEN_PATH` -> `clients.hyperfleet_api.auth.token_path`
+- `HYPERFLEET_API_AUTH_SCHEME` -> `clients.hyperfleet_api.auth.scheme`
 - `HYPERFLEET_API_AUTH_TOKEN_CACHE_TTL` -> `clients.hyperfleet_api.auth.token_cache_ttl`
 
 **Broker**

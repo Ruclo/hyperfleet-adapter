@@ -34,12 +34,20 @@ const (
 // Client Configuration
 // -----------------------------------------------------------------------------
 
-// AuthConfig holds optional JWT bearer token authentication configuration.
-// When set, a bearer token is read from TokenPath and injected as an
-// Authorization header on every outbound request.
+// DefaultAuthScheme is the Authorization header scheme used when AuthConfig.Scheme
+// is not set, matching the "Bearer"-only validation in hyperfleet-api's JWT handler.
+const DefaultAuthScheme = "Bearer"
+
+// AuthConfig holds optional token-based authentication configuration.
+// When set, a token is read from TokenPath and injected using Scheme
+// (defaults to "Bearer") on every outbound request.
 type AuthConfig struct {
-	// TokenPath is the absolute path to a file containing the bearer token.
+	// TokenPath is the absolute path to a file containing the service account token.
 	TokenPath string `yaml:"token_path,omitempty" mapstructure:"token_path"`
+	// Scheme is the Authorization header scheme used when sending the token.
+	// Defaults to "Bearer" when empty; set to "ServiceAccount" when fronted by
+	// a gateway that differentiates human-jwt callers from machine callers.
+	Scheme string `yaml:"scheme,omitempty" mapstructure:"scheme"`
 	// TokenCacheTTL controls how long the token is cached in memory.
 	// Zero means the file is re-read on every request.
 	TokenCacheTTL time.Duration `yaml:"token_cache_ttl,omitempty" mapstructure:"token_cache_ttl"`
@@ -49,7 +57,7 @@ type AuthConfig struct {
 type ClientConfig struct {
 	// DefaultHeaders are headers added to all requests
 	DefaultHeaders map[string]string `yaml:"default_headers,omitempty" mapstructure:"default_headers"`
-	// Auth configures optional JWT bearer token authentication.
+	// Auth configures optional token-based authentication.
 	// When nil, requests are sent without an Authorization header.
 	Auth *AuthConfig `yaml:"auth,omitempty" mapstructure:"auth"`
 	// BaseURL is the base URL for all API requests (must be set by caller)
