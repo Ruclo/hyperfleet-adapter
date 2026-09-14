@@ -551,7 +551,7 @@ func (re *ResourceExecutor) resolveTransport(
 	transportName := resource.GetTransportClient()
 	client, err := re.registry.Get(transportName)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("get transport client %q: %w", transportName, err)
 	}
 
 	if transportName == configloader.TransportClientMaestro {
