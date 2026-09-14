@@ -43,6 +43,7 @@ var viperKeyMappings = map[string]string{
 	"clients::hyperfleet_api::base_delay":              "API_BASE_DELAY",
 	"clients::hyperfleet_api::max_delay":               "API_MAX_DELAY",
 	"clients::hyperfleet_api::auth::token_path":        "API_AUTH_TOKEN_PATH",
+	"clients::hyperfleet_api::auth::scheme":            "API_AUTH_SCHEME",
 	"clients::hyperfleet_api::auth::token_cache_ttl":   "API_AUTH_TOKEN_CACHE_TTL",
 	"clients::broker::subscription_id":                 "BROKER_SUBSCRIPTION_ID",
 	"clients::broker::topic":                           "BROKER_TOPIC",

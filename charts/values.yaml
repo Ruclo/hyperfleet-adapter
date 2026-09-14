@@ -27,15 +27,20 @@ adapterConfig:
     baseUrl: http://hyperfleet-api:8000
     # -- API version (`HYPERFLEET_API_VERSION`)
     version: v1
-    # -- JWT bearer token authentication via Kubernetes projected ServiceAccount token
+    # -- Token-based authentication via a Kubernetes projected service account token
     auth:
-      # -- Enable bearer token auth (`HYPERFLEET_API_AUTH_TOKEN_PATH`)
+      # -- Enable token auth (`HYPERFLEET_API_AUTH_TOKEN_PATH`)
       enabled: false
-      # -- ServiceAccount token audience (used for the projected volume)
+      # -- Service account token audience (used for the projected volume)
       audience: hyperfleet-api
       # -- Absolute path where the token file is mounted
       tokenPath: /var/run/secrets/hyperfleet/token
-      # -- Token lifetime in seconds for the projected ServiceAccount token
+      # -- Authorization header scheme used when sending the token
+      # (`HYPERFLEET_API_AUTH_SCHEME`). Defaults to `Bearer`; set to
+      # `ServiceAccount` when fronted by a gateway that differentiates
+      # machine callers from human-jwt callers.
+      scheme: Bearer
+      # -- Token lifetime in seconds for the projected service account token
       expirationSeconds: 3600
       # -- How long the token is cached in memory (`HYPERFLEET_API_AUTH_TOKEN_CACHE_TTL`).
       # Zero means re-read on every request.

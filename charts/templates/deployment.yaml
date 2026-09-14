@@ -92,6 +92,8 @@ spec:
             {{- if .Values.adapterConfig.hyperfleetApi.auth.enabled }}
             - name: HYPERFLEET_API_AUTH_TOKEN_PATH
               value: {{ .Values.adapterConfig.hyperfleetApi.auth.tokenPath | quote }}
+            - name: HYPERFLEET_API_AUTH_SCHEME
+              value: {{ .Values.adapterConfig.hyperfleetApi.auth.scheme | quote }}
             - name: HYPERFLEET_API_AUTH_TOKEN_CACHE_TTL
               value: {{ .Values.adapterConfig.hyperfleetApi.auth.tokenCacheTtl | quote }}
             {{- end }}

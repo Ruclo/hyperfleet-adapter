@@ -38,6 +38,7 @@ type httpClient struct {
 	client      *http.Client
 	config      *ClientConfig
 	tokenSource *fileTokenSource
+	authScheme  string
 }
 
 // ClientOption is a functional option for configuring the client
@@ -111,7 +112,7 @@ func WithBaseURL(baseURL string) ClientOption {
 	}
 }
 
-// WithAuth configures JWT bearer token authentication from a file.
+// WithAuth configures token-based authentication from a token file.
 func WithAuth(auth *AuthConfig) ClientOption {
 	return func(c *httpClient) {
 		c.config.Auth = auth
@@ -157,9 +158,13 @@ func NewClient(opts ...ClientOption) (Client, error) {
 		}
 	}
 
-	// Initialize token source for bearer token auth if configured
+	// Initialize the token source if auth is configured
 	if c.config.Auth != nil && c.config.Auth.TokenPath != "" {
 		c.tokenSource = newFileTokenSource(c.config.Auth.TokenPath, c.config.Auth.TokenCacheTTL)
+		c.authScheme = c.config.Auth.Scheme
+		if c.authScheme == "" {
+			c.authScheme = DefaultAuthScheme
+		}
 	}
 
 	return c, nil
@@ -334,13 +339,13 @@ func (c *httpClient) doRequest(ctx context.Context, req *Request) (*Response, er
 		httpReq.Header.Set(k, v)
 	}
 
-	// Inject bearer token auth header
+	// Inject the auth header
 	if c.tokenSource != nil {
 		tok, authErr := c.tokenSource.get()
 		if authErr != nil {
 			return nil, fmt.Errorf("getting auth token: %w", authErr)
 		}
-		httpReq.Header.Set("Authorization", "Bearer "+tok)
+		httpReq.Header.Set("Authorization", c.authScheme+" "+tok)
 	}
 
 	// Set default Content-Type for requests with body

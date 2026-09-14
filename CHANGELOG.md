@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Grafana dashboard for adapter metrics (`charts/dashboards/hyperfleet-adapter.json`) — covers events processed, processing duration, errors by type, resource deletions, and adapter health ([HYPERFLEET-1360](https://issues.redhat.com/browse/HYPERFLEET-1360))
+- `clients.hyperfleet_api.auth.scheme` (Helm: `adapterConfig.hyperfleetApi.auth.scheme`) configures the Authorization header scheme sent with the service account token; defaults to `Bearer` for backwards compatibility, set to `ServiceAccount` when fronted by a gateway that differentiates human-jwt callers from machine callers ([HYPERFLEET-1480](https://issues.redhat.com/browse/HYPERFLEET-1480))
 
 ### Fixed
 
