@@ -130,9 +130,6 @@ func TestResourceExecutor_ResolveTransport_RejectsCustomMaestroName(t *testing.T
 		Config: &configloader.Config{Transports: map[string]configloader.TransportDefinition{
 			configloader.TransportClientMaestro: {Type: configloader.TransportTypeRemote},
 		}},
-		TransportRegistry: transportclient.Registry{
-			configloader.TransportClientMaestro: k8sclient.NewMockK8sClient(),
-		},
 	})
 
 	client, target, err := re.resolveTransport(configloader.Resource{

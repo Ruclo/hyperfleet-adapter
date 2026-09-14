@@ -554,15 +554,15 @@ func (re *ResourceExecutor) resolveTransport(
 	if re.config != nil {
 		definition, configured = re.config.Transports[transportName]
 	}
+	if transportName == configloader.TransportClientMaestro && configured {
+		return nil, nil, fmt.Errorf("transport name %q is reserved for the built-in maestro transport", transportName)
+	}
 	client, err := re.registry.Get(transportName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get transport client %q: %w", transportName, err)
 	}
 
 	if transportName == configloader.TransportClientMaestro {
-		if configured {
-			return nil, nil, fmt.Errorf("transport name %q is reserved for the built-in maestro transport", transportName)
-		}
 		if resource.Transport == nil || resource.Transport.Maestro == nil {
 			return nil, nil, fmt.Errorf("maestro transport config is required")
 		}
