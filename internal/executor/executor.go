@@ -49,7 +49,7 @@ func validateExecutorConfig(config *ExecutorConfig) error {
 
 	requiredFields := []string{
 		"APIClient",
-		"TransportClient"}
+		"TransportRegistry"}
 
 	for _, field := range requiredFields {
 		if reflect.ValueOf(config).Elem().FieldByName(field).IsNil() {
@@ -386,10 +386,17 @@ func (b *ExecutorBuilder) WithAPIClient(client hyperfleetapi.Client) *ExecutorBu
 	return b
 }
 
-// WithTransportClient sets the transport client for resource application (kubernetes or maestro)
-func (b *ExecutorBuilder) WithTransportClient(client transportclient.TransportClient) *ExecutorBuilder {
-	b.config.TransportClient = client
+// WithTransportRegistry sets the named transport clients for resource application.
+func (b *ExecutorBuilder) WithTransportRegistry(registry transportclient.Registry) *ExecutorBuilder {
+	b.config.TransportRegistry = registry
 	return b
+}
+
+// WithTransportClient configures a Kubernetes client for callers that use one transport.
+func (b *ExecutorBuilder) WithTransportClient(client transportclient.TransportClient) *ExecutorBuilder {
+	return b.WithTransportRegistry(transportclient.Registry{
+		configloader.TransportClientKubernetes: client,
+	})
 }
 
 // WithMetricsRecorder sets the optional Prometheus metrics recorder

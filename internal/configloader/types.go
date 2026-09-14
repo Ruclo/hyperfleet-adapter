@@ -499,14 +499,24 @@ func (c *Condition) UnmarshalYAML(unmarshal func(interface{}) error) error {
 type TransportConfig struct {
 	// Maestro contains maestro-specific transport settings (required when Client is "maestro")
 	Maestro *MaestroTransportConfig `yaml:"maestro,omitempty"`
-	// Client is the transport client type: "kubernetes" or "maestro"
-	Client string `yaml:"client" validate:"required,oneof=kubernetes maestro"`
+	// Desire contains desire-specific transport settings (required for desire transports).
+	Desire *DesireTransportConfig `yaml:"desire,omitempty"`
+	// Client is the configured transport client name.
+	Client string `yaml:"client" validate:"required"`
 }
 
 // MaestroTransportConfig contains maestro-specific transport settings
 type MaestroTransportConfig struct {
 	// TargetCluster is the name of the target cluster (consumer) for ManifestWork delivery
 	TargetCluster string `yaml:"target_cluster" validate:"required"`
+}
+
+// DesireTransportConfig contains routing settings for Desire delivery.
+type DesireTransportConfig struct {
+	// TargetCluster identifies the target managed cluster and may be a Go template.
+	TargetCluster string `yaml:"target_cluster" validate:"required"`
+	// Resource is the plural Kubernetes resource type used in Desire identities.
+	Resource string `yaml:"resource" validate:"required"`
 }
 
 // Resource represents a resource configuration.

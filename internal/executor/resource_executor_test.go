@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/configloader"
+	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/desireclient"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/k8sclient"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/manifest"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/transportclient"
@@ -18,6 +19,224 @@ import (
 
 // testDeletedTime is a non-null deleted_time value used in lifecycle delete tests to trigger when-expressions.
 const testDeletedTime = "2026-01-01T00:00:00Z"
+
+func TestResourceExecutor_ResolveTransport(t *testing.T) {
+	remoteClient := k8sclient.NewMockK8sClient()
+	kubernetesClient := k8sclient.NewMockK8sClient()
+	namedKubernetesClient := k8sclient.NewMockK8sClient()
+	re := newResourceExecutor(&ExecutorConfig{
+		Config: &configloader.Config{Transports: map[string]configloader.TransportDefinition{
+			"remote-primary":     {Type: configloader.TransportTypeRemote},
+			"kubernetes-primary": {Type: configloader.TransportTypeKubernetes},
+		}},
+		TransportRegistry: transportclient.Registry{
+			"remote-primary":                       remoteClient,
+			"kubernetes-primary":                   namedKubernetesClient,
+			configloader.TransportClientKubernetes: kubernetesClient,
+		},
+	})
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["clusterName"] = "cluster-1"
+
+	tests := []struct {
+		resource       *configloader.Resource
+		wantClient     transportclient.TransportClient
+		wantTarget     transportclient.TransportContext
+		name           string
+		wantErrContain string
+	}{
+		{
+			name:       "uses Kubernetes by default",
+			resource:   &configloader.Resource{},
+			wantClient: kubernetesClient,
+		},
+		{
+			name: "uses named Kubernetes transport without context",
+			resource: &configloader.Resource{Transport: &configloader.TransportConfig{
+				Client: "kubernetes-primary",
+			}},
+			wantClient: namedKubernetesClient,
+		},
+		{
+			name: "builds Desire context for named remote transport",
+			resource: &configloader.Resource{Transport: &configloader.TransportConfig{
+				Client: "remote-primary",
+				Desire: &configloader.DesireTransportConfig{
+					TargetCluster: "{{ .clusterName }}",
+					Resource:      "nodepools",
+				},
+			}},
+			wantClient: remoteClient,
+			wantTarget: &desireclient.TransportContext{
+				ManagementCluster: "cluster-1",
+				Resource:          "nodepools",
+			},
+		},
+		{
+			name: "rejects unknown transport",
+			resource: &configloader.Resource{Transport: &configloader.TransportConfig{
+				Client: "missing-transport",
+			}},
+			wantErrContain: `transport client "missing-transport" not configured`,
+		},
+		{
+			name: "rejects remote transport without Desire configuration",
+			resource: &configloader.Resource{Transport: &configloader.TransportConfig{
+				Client: "remote-primary",
+			}},
+			wantErrContain: `desire transport config is required for "remote-primary"`,
+		},
+		{
+			name: "rejects invalid Desire target cluster template",
+			resource: &configloader.Resource{Transport: &configloader.TransportConfig{
+				Client: "remote-primary",
+				Desire: &configloader.DesireTransportConfig{
+					TargetCluster: "{{ .missing }}",
+					Resource:      "nodepools",
+				},
+			}},
+			wantErrContain: "render desire target cluster",
+		},
+		{
+			name: "rejects Desire transport without resource type",
+			resource: &configloader.Resource{Transport: &configloader.TransportConfig{
+				Client: "remote-primary",
+				Desire: &configloader.DesireTransportConfig{
+					TargetCluster: "cluster-1",
+				},
+			}},
+			wantErrContain: `desire resource is required for "remote-primary"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, target, err := re.resolveTransport(*tt.resource, execCtx)
+
+			if tt.wantErrContain != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErrContain)
+				return
+			}
+			require.NoError(t, err)
+			assert.Same(t, tt.wantClient, client)
+			assert.Equal(t, tt.wantTarget, target)
+		})
+	}
+}
+
+func TestResourceExecutor_ExecuteAll_UnknownTransport(t *testing.T) {
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportRegistry: testTransportRegistry(k8sclient.NewMockK8sClient()),
+	})
+	resource := configloader.Resource{
+		Name: "test-resource",
+		Transport: &configloader.TransportConfig{
+			Client: "missing-transport",
+		},
+	}
+
+	_, err := re.ExecuteAll(
+		context.Background(),
+		[]configloader.Resource{resource},
+		NewExecutionContext(context.Background(), nil, nil),
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `transport client "missing-transport" not configured`)
+}
+
+func newNamedRemoteResourceExecutor(remote, fallback transportclient.TransportClient) *ResourceExecutor {
+	return newResourceExecutor(&ExecutorConfig{
+		Config: &configloader.Config{Transports: map[string]configloader.TransportDefinition{
+			"remote-primary": {Type: configloader.TransportTypeRemote},
+		}},
+		TransportRegistry: transportclient.Registry{
+			"remote-primary":                       remote,
+			configloader.TransportClientKubernetes: fallback,
+		},
+	})
+}
+
+func namedRemoteResource(discovery *configloader.DiscoveryConfig) configloader.Resource {
+	return configloader.Resource{
+		Name: "test-resource",
+		Transport: &configloader.TransportConfig{
+			Client: "remote-primary",
+			Desire: &configloader.DesireTransportConfig{
+				TargetCluster: "cluster-1",
+				Resource:      "configmaps",
+			},
+		},
+		Manifest: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "test-config",
+				"namespace": "default",
+			},
+		},
+		Discovery: discovery,
+	}
+}
+
+func TestResourceExecutor_NamedRemoteTransportRoutesLifecycleOperations(t *testing.T) {
+	fallback := k8sclient.NewMockK8sClient()
+	fallback.ApplyResourceError = errors.New("default transport must not be used")
+	fallback.GetResourceError = errors.New("default transport must not be used")
+	fallback.DiscoverError = errors.New("default transport must not be used")
+	fallback.DeleteResourceError = errors.New("default transport must not be used")
+
+	t.Run("pre-discovery, apply, and by-name discovery", func(t *testing.T) {
+		remote := k8sclient.NewMockK8sClient()
+		resource := namedRemoteResource(&configloader.DiscoveryConfig{Namespace: "default", ByName: "test-config"})
+		resource.Lifecycle = &configloader.ResourceLifecycle{
+			Create: &configloader.LifecycleCreate{When: &configloader.LifecycleWhen{Expression: "true"}},
+		}
+
+		results, err := newNamedRemoteResourceExecutor(remote, fallback).ExecuteAll(
+			context.Background(), []configloader.Resource{resource}, NewExecutionContext(context.Background(), nil, nil))
+
+		require.NoError(t, err)
+		require.Equal(t, manifest.OperationCreate, results[0].Operation)
+	})
+
+	t.Run("selector discovery", func(t *testing.T) {
+		remote := k8sclient.NewMockK8sClient()
+		remote.DiscoverResult = &unstructured.UnstructuredList{Items: []unstructured.Unstructured{{
+			Object: map[string]interface{}{"apiVersion": "v1", "kind": "ConfigMap"},
+		}}}
+		resource := namedRemoteResource(&configloader.DiscoveryConfig{
+			Namespace:   "default",
+			BySelectors: &configloader.SelectorConfig{LabelSelector: map[string]string{"app": "test"}},
+		})
+
+		_, err := newNamedRemoteResourceExecutor(remote, fallback).ExecuteAll(
+			context.Background(), []configloader.Resource{resource}, NewExecutionContext(context.Background(), nil, nil))
+
+		require.NoError(t, err)
+	})
+
+	t.Run("delete and post-delete discovery", func(t *testing.T) {
+		remote := k8sclient.NewMockK8sClient()
+		remote.Resources["default/test-config"] = &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]interface{}{"name": "test-config", "namespace": "default"},
+		}}
+		resource := namedRemoteResource(&configloader.DiscoveryConfig{Namespace: "default", ByName: "test-config"})
+		resource.Lifecycle = &configloader.ResourceLifecycle{
+			Delete: &configloader.LifecycleDelete{When: &configloader.LifecycleWhen{Expression: "true"}},
+		}
+
+		results, err := newNamedRemoteResourceExecutor(remote, fallback).ExecuteAll(
+			context.Background(), []configloader.Resource{resource}, NewExecutionContext(context.Background(), nil, nil))
+
+		require.NoError(t, err)
+		require.Equal(t, manifest.OperationDelete, results[0].Operation)
+		assert.Empty(t, remote.Resources)
+	})
+}
 
 // TestResourceExecutor_ExecuteAll_DiscoveryFailure verifies that when discovery fails after a successful apply,
 // the error is logged and notified: ExecuteAll returns an error, result is failed,
@@ -35,7 +254,7 @@ func TestResourceExecutor_ExecuteAll_DiscoveryFailure(t *testing.T) {
 	}
 
 	config := &ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	}
 	re := newResourceExecutor(config)
 
@@ -137,7 +356,7 @@ func TestResourceExecutor_ExecuteAll_StoresNestedDiscoveriesByName(t *testing.T)
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := configloader.Resource{
@@ -240,7 +459,7 @@ func runNestedDiscoveryExecuteAll(
 		},
 	}
 	execCtx := NewExecutionContext(context.Background(), map[string]interface{}{}, nil)
-	results, err := newResourceExecutor(&ExecutorConfig{TransportClient: mock}).
+	results, err := newResourceExecutor(&ExecutorConfig{TransportRegistry: testTransportRegistry(mock)}).
 		ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
 	return results, execCtx, err
 }
@@ -596,7 +815,7 @@ func TestResourceExecutor_ExecuteAll_StringManifest(t *testing.T) {
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	// Use a string manifest with structural Go templates
@@ -838,7 +1057,7 @@ func TestResourceExecutor_LifecycleCreate_WhenTrue_ResourceNotFound_Applied(t *t
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycleCreate("shouldCreate")
@@ -860,7 +1079,7 @@ func TestResourceExecutor_LifecycleCreate_WhenFalse_ResourceNotFound_Skipped(t *
 	mock.GetResourceError = apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, "test-cm")
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycleCreate("shouldCreate")
@@ -888,7 +1107,7 @@ func TestResourceExecutor_LifecycleCreate_WhenCELError_ExecutionFails(t *testing
 	mock.GetResourceError = apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, "test-cm")
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	// Invalid CEL syntax — evaluateLifecycleWhen will error.
@@ -925,7 +1144,7 @@ func TestResourceExecutor_LifecycleCreate_ResourceAlreadyExists_IgnoresWhen(t *t
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycleCreate("shouldCreate")
@@ -958,7 +1177,7 @@ func TestResourceExecutor_LifecycleCreate_Absent_NormalApply(t *testing.T) {
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := configloader.Resource{
@@ -1082,7 +1301,7 @@ func TestResourceExecutor_LifecycleDelete_WhenTrue_ResourceFound_InstantDelete(t
 	mock.Resources["default/test-cm"] = discovered
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycle("deleted_time != null", "Background")
@@ -1124,7 +1343,7 @@ func TestResourceExecutor_LifecycleDelete_WhenTrue_ResourceFound_WithFinalizers(
 	mock.GetResourceResult = discovered
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycle("deleted_time != null", "Background")
@@ -1154,7 +1373,7 @@ func TestResourceExecutor_LifecycleDelete_WhenTrue_ResourceNotFound(t *testing.T
 	mock.GetResourceError = notFoundErr
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycle("deleted_time != null", "Background")
@@ -1184,7 +1403,7 @@ func TestResourceExecutor_LifecycleDelete_WhenFalse_NormalApply(t *testing.T) {
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	// deleted_time is null → expression "deleted_time != null" is false
@@ -1217,7 +1436,7 @@ func TestResourceExecutor_LifecycleDelete_NoLifecycle_NormalApply(t *testing.T) 
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := configloader.Resource{
@@ -1248,7 +1467,7 @@ func TestResourceExecutor_LifecycleDelete_NoExpression_DefaultsFalse(t *testing.
 	mock := &trackingMockClient{MockK8sClient: k8sclient.NewMockK8sClient()}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycle("", "Foreground")
@@ -1287,7 +1506,7 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_InstantDelete(t *
 	mock.Resources["default/my-cm"] = configMapResource
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	clusterJob := configloader.Resource{
@@ -1363,7 +1582,7 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_WithFinalizers(t 
 	mock.ApplyResourceResult = &transportclient.ApplyResult{Operation: manifest.OperationCreate, Reason: "mock"}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	clusterJob := configloader.Resource{
@@ -1437,7 +1656,7 @@ func TestResourceExecutor_LifecycleDelete_OrderingSecondReconciliation(t *testin
 	mock2.Resources["default/my-cm"] = configMapResource
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock2,
+		TransportRegistry: testTransportRegistry(mock2),
 	})
 
 	clusterJob := configloader.Resource{
@@ -1507,7 +1726,7 @@ func TestResourceExecutor_LifecycleDelete_DeleteError(t *testing.T) {
 	mock.DeleteResourceError = deleteErr
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycle("deleted_time != null", "Background")
@@ -1556,7 +1775,7 @@ func TestResourceExecutor_LifecycleDelete_InvalidCELExpression(t *testing.T) {
 	mock := &trackingMockClient{MockK8sClient: k8sclient.NewMockK8sClient()}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	// "deleted_time != null &&" is a dangling logical-AND — invalid CEL syntax.
@@ -1582,7 +1801,7 @@ func TestResourceExecutor_LifecycleDelete_CELUndeclaredVariable(t *testing.T) {
 	mock := &trackingMockClient{MockK8sClient: k8sclient.NewMockK8sClient()}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	// "not_captured_var" is intentionally absent from execCtx.Params.
@@ -1628,7 +1847,7 @@ func TestResourceExecutor_LifecycleDelete_PropagationPolicy(t *testing.T) {
 			mock.Resources["default/test-cm"] = discovered
 
 			re := newResourceExecutor(&ExecutorConfig{
-				TransportClient: mock,
+				TransportRegistry: testTransportRegistry(mock),
 			})
 
 			resource := newResourceWithLifecycle("deleted_time != null", tt.policy)
@@ -1671,7 +1890,7 @@ func TestResourceExecutor_LifecycleDelete_PreDeleteDiscoveryError(t *testing.T) 
 	}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := newResourceWithLifecycle("deleted_time != null", "Background")
@@ -1702,7 +1921,7 @@ func TestResourceExecutor_LifecycleDelete_DeleteConfigNil(t *testing.T) {
 	mock := k8sclient.NewMockK8sClient()
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := configloader.Resource{
@@ -1749,7 +1968,7 @@ func TestResourceExecutor_LifecycleDelete_Maestro_AsyncDeletion(t *testing.T) {
 	mock.Resources["cluster-1/cluster-1-work"] = discovered
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: transportclient.Registry{configloader.TransportClientMaestro: mock},
 	})
 
 	resource := configloader.Resource{
@@ -1849,7 +2068,7 @@ func TestResourceExecutor_ExecuteAll_ContinuesAfterDeleteFailure(t *testing.T) {
 	mock.ApplyResourceResult = &transportclient.ApplyResult{Operation: manifest.OperationCreate}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resourceA := newResourceWithLifecycle("deleted_time != null", "Background")
@@ -1888,7 +2107,7 @@ func TestResourceExecutor_ExecuteAll_ContinuesAfterCELEvalError(t *testing.T) {
 	mock := k8sclient.NewMockK8sClient()
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	// resourceA has an invalid CEL expression — evaluateLifecycleDeleteWhen will error.
@@ -2002,7 +2221,7 @@ func TestResourceExecutor_LifecycleDelete_BySelectors(t *testing.T) {
 	mock := &selectorTrackingMockClient{MockK8sClient: inner}
 
 	re := newResourceExecutor(&ExecutorConfig{
-		TransportClient: mock,
+		TransportRegistry: testTransportRegistry(mock),
 	})
 
 	resource := configloader.Resource{

@@ -62,8 +62,8 @@ type ExecutorConfig struct {
 	Config *configloader.Config
 	// APIClient is the HyperFleet API client
 	APIClient hyperfleetapi.Client
-	// TransportClient is the transport client for applying resources (kubernetes or maestro)
-	TransportClient transportclient.TransportClient
+	// TransportRegistry resolves the configured transport client for each resource.
+	TransportRegistry transportclient.Registry
 	// MetricsRecorder is the optional Prometheus metrics recorder
 	MetricsRecorder *metrics.Recorder
 }

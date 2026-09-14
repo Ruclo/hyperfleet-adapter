@@ -338,13 +338,13 @@ func createAPIClient(apiConfig configloader.HyperfleetAPIConfig) (hyperfleetapi.
 func buildExecutor(
 	config *configloader.Config,
 	apiClient hyperfleetapi.Client,
-	tc transportclient.TransportClient,
+	registry transportclient.Registry,
 	metricsRecorder *metrics.Recorder,
 ) (*executor.Executor, error) {
 	return executor.NewBuilder().
 		WithConfig(config).
 		WithAPIClient(apiClient).
-		WithTransportClient(tc).
+		WithTransportRegistry(registry).
 		WithMetricsRecorder(metricsRecorder).
 		Build()
 }
@@ -494,14 +494,9 @@ func runServe(flags *pflag.FlagSet) error {
 		}
 	}()
 
-	tc, err := transportRuntime.Registry.Get(transportregistry.CompatibilityKey(config.Clients))
-	if err != nil {
-		return fmt.Errorf("failed to resolve transport client: %w", err)
-	}
-
 	// Build executor
 	slog.InfoContext(ctx, "creating event executor...")
-	exec, err := buildExecutor(config, apiClient, tc, metricsRecorder)
+	exec, err := buildExecutor(config, apiClient, transportRuntime.Registry, metricsRecorder)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to create executor", "error", err)
 		return fmt.Errorf("failed to create executor: %w", err)
@@ -685,13 +680,8 @@ func runDryRun(flags *pflag.FlagSet) error {
 		}
 	}()
 
-	tc, err := transportRuntime.Registry.Get(transportregistry.CompatibilityKey(config.Clients))
-	if err != nil {
-		return fmt.Errorf("failed to resolve recording transport client: %w", err)
-	}
-
 	// Build executor with mock clients (same builder as serve, no metrics in dry-run)
-	exec, err := buildExecutor(config, dryrunAPI, tc, nil)
+	exec, err := buildExecutor(config, dryrunAPI, transportRuntime.Registry, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create executor: %w", err)
 	}

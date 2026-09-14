@@ -468,14 +468,7 @@ func (v *TaskConfigValidator) validateTransportConfig() {
 		if resource.Transport != nil {
 			transportPath := basePath + "." + FieldTransport
 
-			// Validate client type
 			client := resource.Transport.Client
-			if client != TransportClientKubernetes && client != TransportClientMaestro {
-				v.errors.Add(transportPath+"."+FieldClient,
-					fmt.Sprintf("unsupported transport client %q (supported: %s, %s)",
-						client, TransportClientKubernetes, TransportClientMaestro))
-				continue
-			}
 
 			if client == TransportClientMaestro {
 				// Maestro transport requires maestro config
@@ -501,6 +494,21 @@ func (v *TaskConfigValidator) validateTransportConfig() {
 				if resource.Manifest == nil {
 					v.errors.Add(basePath+"."+FieldManifest,
 						"manifest is required for maestro transport")
+				}
+			}
+
+			if resource.Transport.Desire != nil {
+				desirePath := transportPath + "." + FieldDesire
+				if resource.Transport.Desire.TargetCluster == "" {
+					v.errors.Add(desirePath+"."+FieldTargetCluster,
+						"target_cluster is required for desire transport")
+				} else {
+					v.validateTemplateString(resource.Transport.Desire.TargetCluster,
+						desirePath+"."+FieldTargetCluster)
+				}
+				if resource.Transport.Desire.Resource == "" {
+					v.errors.Add(desirePath+"."+FieldResource,
+						"resource is required for desire transport")
 				}
 			}
 		}
