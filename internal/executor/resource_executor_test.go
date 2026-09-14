@@ -125,6 +125,32 @@ func TestResourceExecutor_ResolveTransport(t *testing.T) {
 	}
 }
 
+func TestResourceExecutor_ResolveTransport_RejectsCustomMaestroName(t *testing.T) {
+	re := newResourceExecutor(&ExecutorConfig{
+		Config: &configloader.Config{Transports: map[string]configloader.TransportDefinition{
+			configloader.TransportClientMaestro: {Type: configloader.TransportTypeRemote},
+		}},
+		TransportRegistry: transportclient.Registry{
+			configloader.TransportClientMaestro: k8sclient.NewMockK8sClient(),
+		},
+	})
+
+	client, target, err := re.resolveTransport(configloader.Resource{
+		Transport: &configloader.TransportConfig{
+			Client: configloader.TransportClientMaestro,
+			Desire: &configloader.DesireTransportConfig{
+				TargetCluster: "cluster-1",
+				Resource:      "nodepools",
+			},
+		},
+	}, NewExecutionContext(context.Background(), nil, nil))
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `transport name "maestro" is reserved for the built-in maestro transport`)
+	assert.Nil(t, client)
+	assert.Nil(t, target)
+}
+
 func TestResourceExecutor_ExecuteAll_UnknownTransport(t *testing.T) {
 	re := newResourceExecutor(&ExecutorConfig{
 		TransportRegistry: testTransportRegistry(k8sclient.NewMockK8sClient()),

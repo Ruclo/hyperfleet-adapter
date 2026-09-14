@@ -549,12 +549,20 @@ func (re *ResourceExecutor) resolveTransport(
 	execCtx *ExecutionContext,
 ) (transportclient.TransportClient, transportclient.TransportContext, error) {
 	transportName := resource.GetTransportClient()
+	var definition configloader.TransportDefinition
+	configured := false
+	if re.config != nil {
+		definition, configured = re.config.Transports[transportName]
+	}
 	client, err := re.registry.Get(transportName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get transport client %q: %w", transportName, err)
 	}
 
 	if transportName == configloader.TransportClientMaestro {
+		if configured {
+			return nil, nil, fmt.Errorf("transport name %q is reserved for the built-in maestro transport", transportName)
+		}
 		if resource.Transport == nil || resource.Transport.Maestro == nil {
 			return nil, nil, fmt.Errorf("maestro transport config is required")
 		}
@@ -565,10 +573,6 @@ func (re *ResourceExecutor) resolveTransport(
 		return client, &maestroclient.TransportContext{ConsumerName: targetCluster}, nil
 	}
 
-	if re.config == nil {
-		return client, nil, nil
-	}
-	definition, configured := re.config.Transports[transportName]
 	if !configured || definition.Type != configloader.TransportTypeRemote {
 		return client, nil, nil
 	}
