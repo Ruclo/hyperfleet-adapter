@@ -77,7 +77,9 @@ const (
 	FieldTransport     = "transport"
 	FieldClient        = "client"
 	FieldMaestro       = "maestro"
+	FieldDesire        = "desire"
 	FieldTargetCluster = "target_cluster"
+	FieldResource      = "resource"
 )
 
 // Transport client types

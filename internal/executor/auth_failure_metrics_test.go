@@ -44,7 +44,7 @@ func TestCreateHandler_PostActionAPIAuthFailuresAreAcknowledgedAndRecorded(t *te
 			exec, err := NewBuilder().
 				WithConfig(authFailurePostActionConfig()).
 				WithAPIClient(mockClient).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			require.NoError(t, err)
 
@@ -81,7 +81,7 @@ func TestCreateHandler_PostActionNonAuthAPIFailureDoesNotEmitAuthMetric(t *testi
 	exec, err := NewBuilder().
 		WithConfig(authFailurePostActionConfig()).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -136,7 +136,7 @@ func TestCreateHandler_OptionalAPIParameterAuthFailureIsLoggedAndRecorded(t *tes
 			},
 		}).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -214,7 +214,7 @@ func TestExecutor_PostActionAuthFailureLogsAreContextualAndRedacted(t *testing.T
 			exec, err := NewBuilder().
 				WithConfig(new404PostActionConfig()).
 				WithAPIClient(mockClient).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			require.NoError(t, err)
 
@@ -338,7 +338,7 @@ func TestExecutor_APIAuthFailuresAreLoggedAcrossExecutionPhases(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(tt.config).
 				WithAPIClient(mockClient).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			require.NoError(t, err)
 

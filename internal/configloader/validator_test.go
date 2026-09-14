@@ -756,12 +756,12 @@ func TestValidateTransportConfig(t *testing.T) {
 		require.NoError(t, v.ValidateSemantic())
 	})
 
-	t.Run("unsupported transport client", func(t *testing.T) {
+	t.Run("named transport is validated at execution time", func(t *testing.T) {
 		cfg := baseTaskConfig()
 		cfg.Resources = []Resource{{
 			Name: "testNs",
 			Transport: &TransportConfig{
-				Client: "unsupported",
+				Client: "remote-primary",
 			},
 			Manifest: map[string]interface{}{
 				"apiVersion": "v1",
@@ -771,10 +771,26 @@ func TestValidateTransportConfig(t *testing.T) {
 			Discovery: &DiscoveryConfig{ByName: "test"},
 		}}
 		v := newTaskValidator(cfg)
-		// Structure validation catches invalid oneof
-		err := v.ValidateStructure()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid")
+		require.NoError(t, v.ValidateStructure())
+		require.NoError(t, v.ValidateSemantic())
+	})
+
+	t.Run("valid named desire transport", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Resources = []Resource{{
+			Name: "testNs",
+			Transport: &TransportConfig{
+				Client: "remote-primary",
+				Desire: &DesireTransportConfig{
+					TargetCluster: "cluster-1",
+					Resource:      "namespaces",
+				},
+			},
+			Discovery: &DiscoveryConfig{ByName: "test"},
+		}}
+		v := newTaskValidator(cfg)
+		require.NoError(t, v.ValidateStructure())
+		require.NoError(t, v.ValidateSemantic())
 	})
 
 	t.Run("maestro transport missing maestro config", func(t *testing.T) {

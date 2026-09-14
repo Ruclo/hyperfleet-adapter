@@ -91,7 +91,7 @@ func build404TestExecutor(t *testing.T, config *configloader.Config, mockClient 
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 	return exec
@@ -134,9 +134,9 @@ func TestNewExecutor(t *testing.T) {
 		{
 			name: "valid config",
 			config: &ExecutorConfig{
-				Config:          &configloader.Config{},
-				APIClient:       newMockAPIClient(),
-				TransportClient: k8sclient.NewMockK8sClient(),
+				Config:            &configloader.Config{},
+				APIClient:         newMockAPIClient(),
+				TransportRegistry: testTransportRegistry(k8sclient.NewMockK8sClient()),
 			},
 			expectError: false,
 		},
@@ -165,7 +165,7 @@ func TestExecutorBuilder(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 
 	require.NoError(t, err)
@@ -331,7 +331,7 @@ func TestExecute_ParamExtraction(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	if err != nil {
 		t.Fatalf("unexpected error creating executor: %v", err)
@@ -427,7 +427,7 @@ func TestExecute_ParamsAPICallSource(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -1006,7 +1006,7 @@ func TestSequentialExecution_Preconditions(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(newMockAPIClient()).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			if err != nil {
 				t.Fatalf("unexpected error creating executor: %v", err)
@@ -1078,7 +1078,7 @@ func TestPrecondition_CustomCELFunctions(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(newMockAPIClient()).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			require.NoError(t, err, "failed to create executor")
 
@@ -1164,7 +1164,7 @@ func TestSequentialExecution_Resources(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(newMockAPIClient()).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			if err != nil {
 				t.Fatalf("unexpected error creating executor: %v", err)
@@ -1232,7 +1232,7 @@ func TestSequentialExecution_PostActions(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(mockClient).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			if err != nil {
 				t.Fatalf("unexpected error creating executor: %v", err)
@@ -1299,7 +1299,7 @@ func TestSequentialExecution_SkipReasonCapture(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(newMockAPIClient()).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			if err != nil {
 				t.Fatalf("unexpected error creating executor: %v", err)
@@ -1361,7 +1361,7 @@ func TestCreateHandler_MetricsRecording(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(newMockAPIClient()).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			require.NoError(t, err)
 
@@ -1409,7 +1409,7 @@ func TestCreateHandler_MetricsRecording_Failed(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -1447,7 +1447,7 @@ func TestCreateHandler_NilMetricsRecorder(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -1664,7 +1664,7 @@ func TestPreconditionAPIFailure_ExecutionStatusRemainsFailed(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -1777,7 +1777,7 @@ func TestPreconditionCapture_NamedMapVariable(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(mockClient).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			require.NoError(t, err)
 
@@ -1889,7 +1889,7 @@ func TestPreconditionCapture_FieldDefault(t *testing.T) {
 			exec, err := NewBuilder().
 				WithConfig(config).
 				WithAPIClient(mockClient).
-				WithTransportClient(k8sclient.NewMockK8sClient()).
+				WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 				Build()
 			require.NoError(t, err)
 
@@ -1947,7 +1947,7 @@ func TestPreconditionCapture_ExtractErrorFailsPhase(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -2278,7 +2278,7 @@ func TestCELExpression_EnvVariable(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -2304,7 +2304,7 @@ func TestCELExpression_EventVariable(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -2348,7 +2348,7 @@ func TestCELExpression_EnvInPostActionWhen(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -2388,7 +2388,7 @@ func TestCELExpression_EventInPostActionWhen(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(mockClient).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -2419,7 +2419,7 @@ func TestCELExpression_EnvInParamExpression(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -2441,7 +2441,7 @@ func TestCELExpression_EventInParamExpression(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(k8sclient.NewMockK8sClient()).
+		WithTransportRegistry(testTransportRegistry(k8sclient.NewMockK8sClient())).
 		Build()
 	require.NoError(t, err)
 
@@ -2476,7 +2476,7 @@ func TestGoTemplate_EnvInManifest(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(mockClient).
+		WithTransportRegistry(testTransportRegistry(mockClient)).
 		Build()
 	require.NoError(t, err)
 
@@ -2512,7 +2512,7 @@ func TestGoTemplate_EventInManifest(t *testing.T) {
 	exec, err := NewBuilder().
 		WithConfig(config).
 		WithAPIClient(newMockAPIClient()).
-		WithTransportClient(mockClient).
+		WithTransportRegistry(testTransportRegistry(mockClient)).
 		Build()
 	require.NoError(t, err)
 

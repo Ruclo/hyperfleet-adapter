@@ -10,6 +10,7 @@ import (
 
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/configloader"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/criteria"
+	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/desireclient"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/maestroclient"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/manifest"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/transportclient"
@@ -22,16 +23,18 @@ import (
 
 // ResourceExecutor creates and updates Kubernetes resources
 type ResourceExecutor struct {
-	client  transportclient.TransportClient
-	metrics *metrics.Recorder
+	registry transportclient.Registry
+	config   *configloader.Config
+	metrics  *metrics.Recorder
 }
 
 // newResourceExecutor creates a new resource executor
 // NOTE: Caller (NewExecutor) is responsible for config validation
 func newResourceExecutor(config *ExecutorConfig) *ResourceExecutor {
 	return &ResourceExecutor{
-		client:  config.TransportClient,
-		metrics: config.MetricsRecorder,
+		registry: config.TransportRegistry,
+		config:   config.Config,
+		metrics:  config.MetricsRecorder,
 	}
 }
 
@@ -96,26 +99,11 @@ func (re *ResourceExecutor) executeResource(
 		Status: StatusSuccess,
 	}
 
-	transportClient := re.client
-	if transportClient == nil {
+	transportClient, transportTarget, err := re.resolveTransport(resource, execCtx)
+	if err != nil {
 		result.Status = StatusFailed
-		result.Error = fmt.Errorf("transport client not configured for %s", resource.GetTransportClient())
-		return result, NewExecutorError(PhaseResources, resource.Name, "transport client not configured", result.Error)
-	}
-
-	// Step 1: Build transport context (nil for k8s, *maestroclient.TransportContext for maestro).
-	// Done first so it is available for both the lifecycle delete path and the apply path.
-	var transportTarget transportclient.TransportContext
-	if resource.IsMaestroTransport() && resource.Transport.Maestro != nil {
-		targetCluster, tplErr := utils.RenderTemplate(resource.Transport.Maestro.TargetCluster, execCtx.Params)
-		if tplErr != nil {
-			result.Status = StatusFailed
-			result.Error = tplErr
-			return result, NewExecutorError(PhaseResources, resource.Name, "failed to render targetCluster template", tplErr)
-		}
-		transportTarget = &maestroclient.TransportContext{
-			ConsumerName: targetCluster,
-		}
+		result.Error = err
+		return result, NewExecutorError(PhaseResources, resource.Name, "failed to resolve transport", err)
 	}
 
 	// Step 1.5: Check lifecycle.create — if the resource doesn't exist yet AND the when-expression
@@ -181,7 +169,7 @@ func (re *ResourceExecutor) executeResource(
 			return result, NewExecutorError(PhaseResources, resource.Name, "failed to evaluate lifecycle.delete.when", delErr)
 		}
 		if shouldDelete {
-			return re.executeResourceDelete(ctx, resource, execCtx, transportTarget)
+			return re.executeResourceDelete(ctx, resource, execCtx, transportClient, transportTarget)
 		}
 		// when-expression is false → fall through to normal apply flow
 		slog.DebugContext(ctx, "resource lifecycle.delete.when evaluated to false, applying normally",
@@ -230,7 +218,7 @@ func (re *ResourceExecutor) executeResource(
 
 	// Step 7: Post-apply discovery — find the applied resource and store in execCtx for CEL evaluation
 	if resource.Discovery != nil {
-		discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportTarget)
+		discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportClient, transportTarget)
 		if discoverErr != nil {
 			result.Status = StatusFailed
 			result.Error = discoverErr
@@ -307,6 +295,7 @@ func (re *ResourceExecutor) discoverResource(
 	ctx context.Context,
 	resource configloader.Resource,
 	execCtx *ExecutionContext,
+	transportClient transportclient.TransportClient,
 	transportTarget transportclient.TransportContext,
 ) (*unstructured.Unstructured, error) {
 	discovery := resource.Discovery
@@ -331,7 +320,7 @@ func (re *ResourceExecutor) discoverResource(
 		// For k8s: parse the rendered manifest to get GVK
 		gvk := re.resolveGVK(resource)
 
-		return re.client.GetResource(ctx, gvk, namespace, name, transportTarget)
+		return transportClient.GetResource(ctx, gvk, namespace, name, transportTarget)
 	}
 
 	// Discover by label selector
@@ -357,7 +346,7 @@ func (re *ResourceExecutor) discoverResource(
 
 		gvk := re.resolveGVK(resource)
 
-		list, err := re.client.DiscoverResources(ctx, gvk, discoveryConfig, transportTarget)
+		list, err := transportClient.DiscoverResources(ctx, gvk, discoveryConfig, transportTarget)
 		if err != nil {
 			return nil, err
 		}
@@ -530,18 +519,12 @@ func (re *ResourceExecutor) preDiscoverAll(
 			continue
 		}
 
-		var transportTarget transportclient.TransportContext
-		if resource.IsMaestroTransport() && resource.Transport.Maestro != nil {
-			targetCluster, err := utils.RenderTemplate(resource.Transport.Maestro.TargetCluster, execCtx.Params)
-			if err != nil {
-				slog.WarnContext(ctx, "resource pre-discovery: failed to render targetCluster",
-					"resource", resource.Name, "error", err)
-				return NewExecutorError(PhaseResources, resource.Name, "failed to render targetCluster", err)
-			}
-			transportTarget = &maestroclient.TransportContext{ConsumerName: targetCluster}
+		transportClient, transportTarget, err := re.resolveTransport(resource, execCtx)
+		if err != nil {
+			return NewExecutorError(PhaseResources, resource.Name, "failed to resolve transport", err)
 		}
 
-		discovered, err := re.discoverResource(ctx, resource, execCtx, transportTarget)
+		discovered, err := re.discoverResource(ctx, resource, execCtx, transportClient, transportTarget)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				// Resource does not exist yet — leave absent from context.
@@ -558,6 +541,56 @@ func (re *ResourceExecutor) preDiscoverAll(
 		}
 	}
 	return nil
+}
+
+// resolveTransport selects the resource's client and builds its routing context.
+func (re *ResourceExecutor) resolveTransport(
+	resource configloader.Resource,
+	execCtx *ExecutionContext,
+) (transportclient.TransportClient, transportclient.TransportContext, error) {
+	transportName := resource.GetTransportClient()
+	var definition configloader.TransportDefinition
+	configured := false
+	if re.config != nil {
+		definition, configured = re.config.Transports[transportName]
+	}
+	if transportName == configloader.TransportClientMaestro && configured {
+		return nil, nil, fmt.Errorf("transport name %q is reserved for the built-in maestro transport", transportName)
+	}
+	client, err := re.registry.Get(transportName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get transport client %q: %w", transportName, err)
+	}
+
+	if transportName == configloader.TransportClientMaestro {
+		if resource.Transport == nil || resource.Transport.Maestro == nil {
+			return nil, nil, fmt.Errorf("maestro transport config is required")
+		}
+		targetCluster, templateErr := utils.RenderTemplate(resource.Transport.Maestro.TargetCluster, execCtx.Params)
+		if templateErr != nil {
+			return nil, nil, fmt.Errorf("render maestro target cluster: %w", templateErr)
+		}
+		return client, &maestroclient.TransportContext{ConsumerName: targetCluster}, nil
+	}
+
+	if !configured || definition.Type != configloader.TransportTypeRemote {
+		return client, nil, nil
+	}
+	if resource.Transport == nil || resource.Transport.Desire == nil {
+		return nil, nil, fmt.Errorf("desire transport config is required for %q", transportName)
+	}
+	targetCluster, err := utils.RenderTemplate(resource.Transport.Desire.TargetCluster, execCtx.Params)
+	if err != nil {
+		return nil, nil, fmt.Errorf("render desire target cluster: %w", err)
+	}
+	if resource.Transport.Desire.Resource == "" {
+		return nil, nil, fmt.Errorf("desire resource is required for %q", transportName)
+	}
+
+	return client, &desireclient.TransportContext{
+		ManagementCluster: targetCluster,
+		Resource:          resource.Transport.Desire.Resource,
+	}, nil
 }
 
 // evaluateLifecycleWhen evaluates a lifecycle when-expression (create or delete) against the
@@ -611,6 +644,7 @@ func (re *ResourceExecutor) executeResourceDelete(
 	ctx context.Context,
 	resource configloader.Resource,
 	execCtx *ExecutionContext,
+	transportClient transportclient.TransportClient,
 	transportTarget transportclient.TransportContext,
 ) (ResourceResult, error) {
 	// Extract resource type (Kubernetes kind) from manifest for metrics labeling.
@@ -633,7 +667,7 @@ func (re *ResourceExecutor) executeResourceDelete(
 	}
 
 	// Step 1: Discover the existing resource
-	discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportTarget)
+	discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportClient, transportTarget)
 
 	isNotFound := discoverErr != nil && apierrors.IsNotFound(discoverErr)
 	if discoverErr != nil && !isNotFound {
@@ -680,7 +714,7 @@ func (re *ResourceExecutor) executeResourceDelete(
 	deleteOpts := &transportclient.DeleteOptions{PropagationPolicy: propagationPolicy}
 
 	// Step 5: Delete via transport client
-	if err := re.client.DeleteResource(
+	if err := transportClient.DeleteResource(
 		ctx, gvk, result.Namespace, result.ResourceName, deleteOpts, transportTarget,
 	); err != nil {
 		result.Status = StatusFailed
@@ -698,7 +732,7 @@ func (re *ResourceExecutor) executeResourceDelete(
 	//   Store nil so dependent resources can cascade in the same reconciliation.
 	// - If still present (e.g., deletionTimestamp set, finalizers running, or Maestro async):
 	//   Store the object so dependent resources wait for the next reconciliation.
-	postDeleteDiscovered, postDiscoverErr := re.discoverResource(ctx, resource, execCtx, transportTarget)
+	postDeleteDiscovered, postDiscoverErr := re.discoverResource(ctx, resource, execCtx, transportClient, transportTarget)
 	postIsNotFound := postDiscoverErr != nil && apierrors.IsNotFound(postDiscoverErr)
 	switch {
 	case postDiscoverErr != nil && !postIsNotFound:
