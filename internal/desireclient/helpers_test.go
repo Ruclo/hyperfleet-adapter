@@ -82,6 +82,32 @@ func putKubeAPIErrorReadDesire(
 	})
 }
 
+// putDeleteDesire creates a delete desire with the given condition status and reason.
+func putDeleteDesire(
+	t *testing.T, ctx context.Context, store *memory.Store,
+	condStatus metav1.ConditionStatus, reason string,
+) {
+	t.Helper()
+	id := desire.Identity{
+		ManagementCluster: testManagementCluster, Type: desire.TypeDelete,
+		Resource: testResource, Namespace: testNamespace, Name: testName,
+	}
+	dd, err := store.CreateDeleteDesire(ctx, desire.DeleteDesire{Identity: id, Owner: testOwner})
+	require.NoError(t, err)
+	_, err = store.UpdateDeleteDesireStatus(ctx, id, desire.Status{
+		Conditions: []metav1.Condition{{
+			Type: desire.TypeSuccessful, Status: condStatus, Reason: reason,
+		}},
+	}, dd.Version)
+	require.NoError(t, err)
+}
+
+// putConfirmedDeleteDesire creates a delete desire marked as successfully deleted.
+func putConfirmedDeleteDesire(t *testing.T, ctx context.Context, store *memory.Store) {
+	t.Helper()
+	putDeleteDesire(t, ctx, store, metav1.ConditionTrue, desire.ReasonDeleted)
+}
+
 // successfulCondition builds the single summary condition every desire carries.
 func successfulCondition(status metav1.ConditionStatus, reason string) *metav1.Condition {
 	return &metav1.Condition{Type: desire.TypeSuccessful, Status: status, Reason: reason}

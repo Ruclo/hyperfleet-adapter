@@ -2284,3 +2284,171 @@ func TestResourceExecutor_LifecycleDelete_BySelectors(t *testing.T) {
 	assert.True(t, exists, "nil sentinel should be in execCtx.Resources")
 	assert.Nil(t, storedVal, "nil stored when post-delete discovery finds no resources")
 }
+
+// ---- DesireCleaner integration ----
+
+func TestResourceExecutor_LifecycleDelete_Step2_CleanupCalled(t *testing.T) {
+	inner := k8sclient.NewMockK8sClient()
+	mock := &cleanupTrackingDeleteMockClient{
+		MockK8sClient: inner,
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportRegistry: testTransportRegistry(mock),
+	})
+
+	resource := newResourceWithLifecycle("deleted_time != null", "Background")
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["deleted_time"] = testDeletedTime
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusSuccess, results[0].Status)
+	assert.False(t, mock.DeleteCalled, "DeleteResource must not be called when resource was already gone")
+	assert.True(t, mock.CleanupCalled, "CleanupAfterDeletion must be called when resource is not found")
+	assert.Equal(t, "default", mock.CleanupNamespace)
+	assert.Equal(t, "test-cm", mock.CleanupName)
+}
+
+func TestResourceExecutor_LifecycleDelete_Step6_CleanupCalled(t *testing.T) {
+	discovered := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]interface{}{"name": "test-cm", "namespace": "default"},
+		},
+	}
+
+	inner := k8sclient.NewMockK8sClient()
+	// Resource exists initially, DeleteResource removes it from Resources map,
+	// so post-delete GetResource returns NotFound.
+	inner.Resources["default/test-cm"] = discovered
+	mock := &cleanupTrackingDeleteMockClient{
+		MockK8sClient: inner,
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportRegistry: testTransportRegistry(mock),
+	})
+
+	resource := newResourceWithLifecycle("deleted_time != null", "Background")
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["deleted_time"] = testDeletedTime
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusSuccess, results[0].Status)
+	assert.True(t, mock.DeleteCalled, "DeleteResource must be called")
+	assert.True(t, mock.CleanupCalled, "CleanupAfterDeletion must be called when post-delete discovery confirms gone")
+	assert.Equal(t, "default", mock.CleanupNamespace)
+	assert.Equal(t, "test-cm", mock.CleanupName)
+}
+
+// cleanupTrackingDeleteMockClient delegates to MockK8sClient (which removes resources on delete)
+// and implements DesireCleaner to track cleanup calls.
+type cleanupTrackingDeleteMockClient struct {
+	*k8sclient.MockK8sClient
+	CleanupError     error
+	CleanupNamespace string
+	CleanupName      string
+	DeleteCalled     bool
+	CleanupCalled    bool
+}
+
+func (m *cleanupTrackingDeleteMockClient) DeleteResource(
+	ctx context.Context,
+	gvk schema.GroupVersionKind,
+	namespace, name string,
+	opts *transportclient.DeleteOptions,
+	target transportclient.TransportContext,
+) error {
+	m.DeleteCalled = true
+	return m.MockK8sClient.DeleteResource(ctx, gvk, namespace, name, opts, target)
+}
+
+func (m *cleanupTrackingDeleteMockClient) CleanupAfterDeletion(
+	_ context.Context,
+	_ schema.GroupVersionKind,
+	namespace, name string,
+	_ transportclient.TransportContext,
+) error {
+	m.CleanupCalled = true
+	m.CleanupNamespace = namespace
+	m.CleanupName = name
+	return m.CleanupError
+}
+
+func TestResourceExecutor_LifecycleDelete_CleanupError_StatusFailed(t *testing.T) {
+	inner := k8sclient.NewMockK8sClient()
+	mock := &cleanupTrackingDeleteMockClient{
+		MockK8sClient: inner,
+		CleanupError:  errors.New("cleanup: deletion not yet confirmed"),
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportRegistry: testTransportRegistry(mock),
+	})
+
+	resource := newResourceWithLifecycle("deleted_time != null", "Background")
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["deleted_time"] = testDeletedTime
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.Error(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusFailed, results[0].Status)
+	assert.True(t, mock.CleanupCalled)
+}
+
+// cleanupKeepOnDeleteMockClient keeps the resource after delete (simulating finalizers/async)
+// and implements DesireCleaner to track whether cleanup was attempted.
+type cleanupKeepOnDeleteMockClient struct {
+	*keepOnDeleteMockClient
+	CleanupCalled bool
+}
+
+func (m *cleanupKeepOnDeleteMockClient) CleanupAfterDeletion(
+	_ context.Context,
+	_ schema.GroupVersionKind,
+	_, _ string,
+	_ transportclient.TransportContext,
+) error {
+	m.CleanupCalled = true
+	return nil
+}
+
+func TestResourceExecutor_LifecycleDelete_StillPresent_NoCleanup(t *testing.T) {
+	discovered := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]interface{}{"name": "test-cm", "namespace": "default"},
+		},
+	}
+
+	inner := k8sclient.NewMockK8sClient()
+	inner.Resources["default/test-cm"] = discovered
+	mock := &cleanupKeepOnDeleteMockClient{
+		keepOnDeleteMockClient: &keepOnDeleteMockClient{MockK8sClient: inner},
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportRegistry: testTransportRegistry(mock),
+	})
+
+	resource := newResourceWithLifecycle("deleted_time != null", "Background")
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["deleted_time"] = testDeletedTime
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusSuccess, results[0].Status)
+	assert.False(t, mock.CleanupCalled, "CleanupAfterDeletion must not be called when resource is still present")
+}

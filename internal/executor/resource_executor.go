@@ -291,6 +291,30 @@ func (re *ResourceExecutor) renderToBytes(
 // For k8s transport: discovers the K8s resource by name or label selector.
 // For maestro transport: discovers the ManifestWork by name or label selector.
 // The discovered resource is stored in execCtx.Resources for post-action CEL evaluation.
+type discoveryTarget struct {
+	Namespace string
+	Name      string
+}
+
+func (re *ResourceExecutor) renderDiscoveryTarget(
+	discovery *configloader.DiscoveryConfig,
+	params map[string]any,
+) (*discoveryTarget, error) {
+	namespace, err := utils.RenderTemplate(discovery.Namespace, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to render namespace template: %w", err)
+	}
+	dt := &discoveryTarget{Namespace: namespace}
+	if discovery.ByName != "" {
+		name, err := utils.RenderTemplate(discovery.ByName, params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to render byName template: %w", err)
+		}
+		dt.Name = name
+	}
+	return dt, nil
+}
+
 func (re *ResourceExecutor) discoverResource(
 	ctx context.Context,
 	resource configloader.Resource,
@@ -303,24 +327,15 @@ func (re *ResourceExecutor) discoverResource(
 		return nil, nil
 	}
 
-	// Render discovery namespace template
-	namespace, err := utils.RenderTemplate(discovery.Namespace, execCtx.Params)
+	dt, err := re.renderDiscoveryTarget(discovery, execCtx.Params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to render namespace template: %w", err)
+		return nil, err
 	}
 
 	// Discover by name
 	if discovery.ByName != "" {
-		name, err := utils.RenderTemplate(discovery.ByName, execCtx.Params)
-		if err != nil {
-			return nil, fmt.Errorf("failed to render byName template: %w", err)
-		}
-
-		// For maestro: use ManifestWork GVK
-		// For k8s: parse the rendered manifest to get GVK
 		gvk := re.resolveGVK(resource)
-
-		return transportClient.GetResource(ctx, gvk, namespace, name, transportTarget)
+		return transportClient.GetResource(ctx, gvk, dt.Namespace, dt.Name, transportTarget)
 	}
 
 	// Discover by label selector
@@ -340,7 +355,7 @@ func (re *ResourceExecutor) discoverResource(
 
 		labelSelector := manifest.BuildLabelSelector(renderedLabels)
 		discoveryConfig := &manifest.DiscoveryConfig{
-			Namespace:     namespace,
+			Namespace:     dt.Namespace,
 			LabelSelector: labelSelector,
 		}
 
@@ -359,6 +374,25 @@ func (re *ResourceExecutor) discoverResource(
 	}
 
 	return nil, fmt.Errorf("discovery config must specify byName or bySelectors")
+}
+
+func (re *ResourceExecutor) tryCleanupDesires(
+	ctx context.Context,
+	resource configloader.Resource,
+	execCtx *ExecutionContext,
+	transportClient transportclient.TransportClient,
+	transportTarget transportclient.TransportContext,
+	gvk schema.GroupVersionKind,
+) error {
+	cleaner, ok := transportClient.(transportclient.DesireCleaner)
+	if !ok || resource.Discovery == nil || resource.Discovery.ByName == "" {
+		return nil
+	}
+	dt, err := re.renderDiscoveryTarget(resource.Discovery, execCtx.Params)
+	if err != nil {
+		return err
+	}
+	return cleaner.CleanupAfterDeletion(ctx, gvk, dt.Namespace, dt.Name, transportTarget)
 }
 
 // discoverNestedResources discovers sub-resources within a parent resource (e.g., manifests inside a ManifestWork).
@@ -685,8 +719,20 @@ func (re *ResourceExecutor) executeResourceDelete(
 		// Store nil — the key is removed from the CEL resources map, so
 		// !resources.?X.hasValue() evaluates to true in this reconciliation.
 		execCtx.Resources[resource.Name] = nil
-		result.OperationReason = "resource already deleted or never existed"
+
+		if err := re.tryCleanupDesires(ctx, resource, execCtx, transportClient, transportTarget, gvk); err != nil {
+			slog.ErrorContext(ctx, "resource desire cleanup failed after delete",
+				"resource", resource.Name, "error", err)
+			result.Status = StatusFailed
+			result.Error = err
+			re.recordResourceError(execCtx, resource, err)
+			re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
+			re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
+			return result, NewExecutorError(PhaseResources, resource.Name, "desire cleanup failed", err)
+		}
+
 		slog.InfoContext(ctx, "resource delete: already deleted or never existed", "resource", resource.Name)
+		result.OperationReason = "resource already deleted or never existed"
 		re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusSuccess)
 		re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
 		return result, nil
@@ -744,6 +790,16 @@ func (re *ResourceExecutor) executeResourceDelete(
 		// Resource is confirmed gone: dependent resources can proceed in this reconciliation.
 		execCtx.Resources[resource.Name] = nil
 		slog.DebugContext(ctx, "resource confirmed deleted (post-delete discovery: not found)", "resource", resource.Name)
+		if err := re.tryCleanupDesires(ctx, resource, execCtx, transportClient, transportTarget, gvk); err != nil {
+			slog.ErrorContext(ctx, "resource desire cleanup failed after delete",
+				"resource", resource.Name, "error", err)
+			result.Status = StatusFailed
+			result.Error = err
+			re.recordResourceError(execCtx, resource, err)
+			re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
+			re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
+			return result, NewExecutorError(PhaseResources, resource.Name, "desire cleanup failed", err)
+		}
 	default:
 		// Resource still present (finalizers or async deletion): dependents wait for next reconciliation.
 		execCtx.Resources[resource.Name] = postDeleteDiscovered
