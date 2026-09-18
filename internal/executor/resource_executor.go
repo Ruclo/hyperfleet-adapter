@@ -721,12 +721,17 @@ func (re *ResourceExecutor) executeResourceDelete(
 		execCtx.Resources[resource.Name] = nil
 
 		if err := re.tryCleanupDesires(ctx, resource, execCtx, transportClient, transportTarget, gvk); err != nil {
-			slog.ErrorContext(ctx, "resource desire cleanup failed after delete",
-				"resource", resource.Name, "error", err)
+			if errors.Is(err, desireclient.ErrDeletionPending) {
+				slog.WarnContext(ctx, "resource desire cleanup: deletion pending",
+					"resource", resource.Name, "error", err)
+			} else {
+				slog.ErrorContext(ctx, "resource desire cleanup failed after delete",
+					"resource", resource.Name, "error", err)
+				re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
+			}
 			result.Status = StatusFailed
 			result.Error = err
 			re.recordResourceError(execCtx, resource, err)
-			re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
 			re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
 			return result, NewExecutorError(PhaseResources, resource.Name, "desire cleanup failed", err)
 		}

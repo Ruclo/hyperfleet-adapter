@@ -14,7 +14,9 @@ import (
 // CleanupAfterDeletion implements transportclient.DesireCleaner. It removes
 // the delete desire (only when the applier confirms deletion) then the read
 // desire. Returns an error if the delete desire exists but is not yet confirmed,
-// causing the executor to retry on the next reconciliation.
+// or if no delete desire exists but an apply desire is still present (the
+// applier may not have applied it yet), causing the executor to retry on the
+// next reconciliation.
 func (c *Client) CleanupAfterDeletion(
 	ctx context.Context,
 	gvk schema.GroupVersionKind,
@@ -34,13 +36,27 @@ func (c *Client) CleanupAfterDeletion(
 	dd, err := c.store.GetDeleteDesire(ctx, deleteID)
 	switch {
 	case errors.Is(err, desire.ErrNotFound):
-		// No delete desire — proceed to read desire cleanup.
+		applyID, buildErr := buildIdentity(tc, desire.TypeApply, gvk, namespace, name)
+		if buildErr != nil {
+			return buildErr
+		}
+		_, applyErr := c.store.GetApplyDesire(ctx, applyID)
+		switch {
+		case applyErr == nil:
+			return fmt.Errorf(
+				"desireclient: cleanup: apply desire still exists for %s/%s,"+
+					" resource may not have been created yet: %w",
+				namespace, name, ErrDeletionPending)
+		case !errors.Is(applyErr, desire.ErrNotFound):
+			return fmt.Errorf("desireclient: cleanup: failed to get apply desire for %s/%s: %w",
+				namespace, name, applyErr)
+		}
 	case err != nil:
 		return fmt.Errorf("desireclient: cleanup: failed to get delete desire for %s/%s: %w",
 			namespace, name, err)
 	case !desire.IsDeleted(dd.Status):
-		return fmt.Errorf("desireclient: cleanup: deletion not yet confirmed for %s/%s",
-			namespace, name)
+		return fmt.Errorf("desireclient: cleanup: deletion not yet confirmed for %s/%s: %w",
+			namespace, name, ErrDeletionPending)
 	default:
 		if delErr := c.store.DeleteDeleteDesire(ctx, deleteID, c.owner, dd.Version); delErr != nil {
 			return fmt.Errorf("desireclient: cleanup: failed to delete delete desire for %s/%s: %w",

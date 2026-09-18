@@ -213,6 +213,17 @@ func TestCleanupAfterDeletion_DeleteReadDesireError(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to delete read desire")
 }
 
+func TestCleanupAfterDeletion_GetApplyDesireError_NoDeleteDesire_ReturnsStoreError(t *testing.T) {
+	ctx := context.Background()
+	store := &failingGetApplyDesireStore{SpecStore: newMemoryStore()}
+	c := newTestClient(store)
+
+	err := c.CleanupAfterDeletion(ctx, testGVK(), testNamespace, testName, testTransportContext())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get apply desire")
+	assert.False(t, errors.Is(err, ErrDeletionPending), "genuine store error must not be wrapped as ErrDeletionPending")
+}
+
 // --- Test store wrappers ---
 
 type failingGetDeleteDesireStore struct {
@@ -223,6 +234,16 @@ func (f *failingGetDeleteDesireStore) GetDeleteDesire(
 	_ context.Context, _ desire.Identity,
 ) (desire.DeleteDesire, error) {
 	return desire.DeleteDesire{}, errors.New("boom: store unavailable")
+}
+
+type failingGetApplyDesireStore struct {
+	desire.SpecStore
+}
+
+func (f *failingGetApplyDesireStore) GetApplyDesire(
+	_ context.Context, _ desire.Identity,
+) (desire.ApplyDesire, error) {
+	return desire.ApplyDesire{}, errors.New("boom: store unavailable")
 }
 
 type failingDeleteDeleteDesireStore struct {
