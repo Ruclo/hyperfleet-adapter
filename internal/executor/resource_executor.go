@@ -219,6 +219,11 @@ func (re *ResourceExecutor) executeResource(
 	// Step 7: Post-apply discovery — find the applied resource and store in execCtx for CEL evaluation
 	if resource.Discovery != nil {
 		discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportClient, transportTarget)
+		if errors.Is(discoverErr, desireclient.ErrNotSyncedYet) {
+			slog.DebugContext(ctx, "resource not synced yet, skipping post-apply discovery",
+				"resource", resource.Name)
+			return result, nil
+		}
 		if discoverErr != nil {
 			result.Status = StatusFailed
 			result.Error = discoverErr
@@ -560,7 +565,7 @@ func (re *ResourceExecutor) preDiscoverAll(
 
 		discovered, err := re.discoverResource(ctx, resource, execCtx, transportClient, transportTarget)
 		if err != nil {
-			if apierrors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) || errors.Is(err, desireclient.ErrNotSyncedYet) {
 				// Resource does not exist yet — leave absent from context.
 				continue
 			}
@@ -705,10 +710,15 @@ func (re *ResourceExecutor) executeResourceDelete(
 
 	isNotFound := discoverErr != nil && apierrors.IsNotFound(discoverErr)
 	if discoverErr != nil && !isNotFound {
+		if errors.Is(discoverErr, desireclient.ErrNotSyncedYet) {
+			slog.WarnContext(ctx, "resource not synced yet, cannot discover for deletion",
+				"resource", resource.Name, "error", discoverErr)
+		} else {
+			re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
+		}
 		result.Status = StatusFailed
 		result.Error = discoverErr
 		re.recordResourceError(execCtx, resource, discoverErr)
-		re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
 		re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
 		return result, NewExecutorError(
 			PhaseResources, resource.Name, "failed to discover resource for deletion", discoverErr)

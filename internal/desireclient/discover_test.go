@@ -59,8 +59,10 @@ func TestDiscoverResources_LabelSelectorMatchesSubset(t *testing.T) {
 		"apiVersion": "v1", "kind": "ConfigMap",
 		"metadata": {"name": "unlabeled", "namespace": "default"}
 	}`)
-	PutSyncedReadDesire(t, ctx, store, testID.WithNamespace("labeled").WithName("labeled").Read(), testOwner, labeledManifest)
-	PutSyncedReadDesire(t, ctx, store, testID.WithNamespace("unlabeled").WithName("unlabeled").Read(), testOwner, unlabeledManifest)
+	PutSyncedReadDesire(t, ctx, store,
+		testID.WithNamespace("labeled").WithName("labeled").Read(), testOwner, labeledManifest)
+	PutSyncedReadDesire(t, ctx, store,
+		testID.WithNamespace("unlabeled").WithName("unlabeled").Read(), testOwner, unlabeledManifest)
 
 	list, err := c.DiscoverResources(ctx, testGVK(),
 		&manifest.DiscoveryConfig{LabelSelector: "app=myapp"}, testTransportContext())

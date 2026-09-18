@@ -10,6 +10,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// PutUnsyncedReadDesire creates a read desire with no status condition,
+// simulating a desire the applier has not observed yet.
+func PutUnsyncedReadDesire(
+	t testing.TB, ctx context.Context, store *memory.Store,
+	id desire.Identity, owner string,
+) {
+	t.Helper()
+	_, err := store.CreateReadDesire(ctx, desire.ReadDesire{
+		Identity: id, Owner: owner, TargetVersion: "v1",
+	})
+	require.NoError(t, err)
+}
+
 // PutReadDesire creates a read desire with the given identity, owner, and status.
 func PutReadDesire(
 	t testing.TB, ctx context.Context, store *memory.Store,
@@ -178,8 +191,11 @@ func (ti TestIdentity) build(t desire.DesireType) desire.Identity {
 }
 
 func (ti TestIdentity) Read() desire.Identity   { return ti.build(desire.TypeRead) }
-func (ti TestIdentity) Delete() desire.Identity  { return ti.build(desire.TypeDelete) }
-func (ti TestIdentity) Apply() desire.Identity   { return ti.build(desire.TypeApply) }
+func (ti TestIdentity) Delete() desire.Identity { return ti.build(desire.TypeDelete) }
+func (ti TestIdentity) Apply() desire.Identity  { return ti.build(desire.TypeApply) }
 
-func (ti TestIdentity) WithName(name string) TestIdentity           { ti.Name = name; return ti }
-func (ti TestIdentity) WithNamespace(namespace string) TestIdentity { ti.Namespace = namespace; return ti }
+func (ti TestIdentity) WithName(name string) TestIdentity { ti.Name = name; return ti }
+func (ti TestIdentity) WithNamespace(namespace string) TestIdentity {
+	ti.Namespace = namespace
+	return ti
+}
