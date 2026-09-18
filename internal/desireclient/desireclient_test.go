@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/desireclient/desiretest"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/pkg/constants"
 	"github.com/openshift-hyperfleet/hyperfleet-applier/pkg/desire"
 	"github.com/openshift-hyperfleet/hyperfleet-applier/pkg/desire/store/memory"
@@ -72,7 +73,7 @@ func (f *failingCreateDeleteDesireStore) CreateDeleteDesire(
 	return desire.DeleteDesire{}, errors.New("boom: delete desire store unavailable")
 }
 
-var testID = TestIdentity{
+var testID = desiretest.TestIdentity{
 	ManagementCluster: testManagementCluster,
 	Resource:          testResource,
 	Namespace:         testNamespace,

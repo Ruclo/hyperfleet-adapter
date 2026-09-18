@@ -7,6 +7,7 @@ import (
 
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/configloader"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/desireclient"
+	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/desireclient/desiretest"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/k8sclient"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/manifest"
 	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/transportclient"
@@ -2463,7 +2464,7 @@ const (
 	desireOwner         = "hyperfleet-adapter"
 )
 
-var testDesireID = desireclient.TestIdentity{
+var testDesireID = desiretest.TestIdentity{
 	ManagementCluster: "cluster-1",
 	Resource:          "configmaps",
 	Namespace:         "default",
@@ -2542,7 +2543,7 @@ func TestResourceExecutor_DesireTransport_SlowApplier(t *testing.T) {
 	re := newDesireExecutor(store)
 	resource := newDesireResourceWithLifecycle("deleted_time != null", "Background")
 
-	desireclient.PutUnsyncedReadDesire(t, ctx, store, testDesireID.Read(), desireOwner)
+	desiretest.PutUnsyncedReadDesire(t, ctx, store, testDesireID.Read(), desireOwner)
 
 	// ---- Event 1: apply (deleted_time absent → delete.when false) ----
 	execCtx := NewExecutionContext(ctx, nil, nil)
@@ -2556,7 +2557,7 @@ func TestResourceExecutor_DesireTransport_SlowApplier(t *testing.T) {
 	_, err = store.GetReadDesire(ctx, testDesireID.Read())
 	require.NoError(t, err, "ReadDesire must exist after apply")
 
-	desireclient.MarkReadDesireSynced(t, ctx, store, testDesireID.Read(), configMapContent())
+	desiretest.MarkReadDesireSynced(t, ctx, store, testDesireID.Read(), configMapContent())
 
 	// ---- Event 2: delete (applier hasn't confirmed yet) ----
 	execCtx = NewExecutionContext(ctx, nil, nil)
@@ -2575,8 +2576,8 @@ func TestResourceExecutor_DesireTransport_SlowApplier(t *testing.T) {
 	_, err = store.GetReadDesire(ctx, testDesireID.Read())
 	assert.NoError(t, err, "ReadDesire must still exist")
 
-	desireclient.MarkDeleteDesireConfirmed(t, ctx, store, testDesireID.Delete())
-	desireclient.MarkReadDesireNotFound(t, ctx, store, testDesireID.Read())
+	desiretest.MarkDeleteDesireConfirmed(t, ctx, store, testDesireID.Delete())
+	desiretest.MarkReadDesireNotFound(t, ctx, store, testDesireID.Read())
 
 	// ---- Event 3: delete (applier confirmed) ----
 	execCtx = NewExecutionContext(ctx, nil, nil)
@@ -2608,19 +2609,23 @@ func (s *instantApplierStore) CreateDeleteDesire(
 	if err != nil {
 		return created, err
 	}
-	s.UpdateDeleteDesireStatus(ctx, dd.Identity, desire.Status{
+	if _, err = s.UpdateDeleteDesireStatus(ctx, dd.Identity, desire.Status{
 		Conditions: []metav1.Condition{{
 			Type: desire.TypeSuccessful, Status: metav1.ConditionTrue, Reason: desire.ReasonDeleted,
 		}},
-	}, created.Version)
+	}, created.Version); err != nil {
+		return created, err
+	}
 
 	readID := dd.Identity
 	readID.Type = desire.TypeRead
-	s.UpdateReadDesireStatus(ctx, readID, desire.ReadStatus{
+	if _, err = s.UpdateReadDesireStatus(ctx, readID, desire.ReadStatus{
 		Status: desire.Status{Conditions: []metav1.Condition{{
 			Type: desire.TypeSuccessful, Status: metav1.ConditionFalse, Reason: desire.ReasonNotFound,
 		}}},
-	})
+	}); err != nil {
+		return created, err
+	}
 	return created, nil
 }
 
@@ -2643,7 +2648,7 @@ func TestResourceExecutor_DesireTransport_FastApplier(t *testing.T) {
 	})
 	resource := newDesireResourceWithLifecycle("deleted_time != null", "Background")
 
-	desireclient.PutUnsyncedReadDesire(t, ctx, inner, testDesireID.Read(), desireOwner)
+	desiretest.PutUnsyncedReadDesire(t, ctx, inner, testDesireID.Read(), desireOwner)
 
 	// ---- Event 1: apply ----
 	execCtx := NewExecutionContext(ctx, nil, nil)
@@ -2652,7 +2657,7 @@ func TestResourceExecutor_DesireTransport_FastApplier(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.Equal(t, StatusSuccess, results[0].Status)
 
-	desireclient.MarkReadDesireSynced(t, ctx, inner, testDesireID.Read(), configMapContent())
+	desiretest.MarkReadDesireSynced(t, ctx, inner, testDesireID.Read(), configMapContent())
 
 	// ---- Event 2: delete (applier confirms instantly via wrapper) ----
 	execCtx = NewExecutionContext(ctx, nil, nil)
@@ -2681,7 +2686,7 @@ func TestResourceExecutor_DesireTransport_TransientNotFound(t *testing.T) {
 	re := newDesireExecutor(store)
 	resource := newDesireResourceWithLifecycle("deleted_time != null", "Background")
 
-	desireclient.PutUnsyncedReadDesire(t, ctx, store, testDesireID.Read(), desireOwner)
+	desiretest.PutUnsyncedReadDesire(t, ctx, store, testDesireID.Read(), desireOwner)
 
 	// ---- Event 1: apply ----
 	execCtx := NewExecutionContext(ctx, nil, nil)
@@ -2734,7 +2739,7 @@ func TestResourceExecutor_DesireTransport_FullLifecycleFromEmptyStore(t *testing
 	require.NoError(t, err, "ReadDesire must be auto-created by ensureReadDesire")
 
 	// Simulate applier syncing the read mirror.
-	desireclient.MarkReadDesireSynced(t, ctx, store, testDesireID.Read(), configMapContent())
+	desiretest.MarkReadDesireSynced(t, ctx, store, testDesireID.Read(), configMapContent())
 
 	// ---- Event 2: apply after sync (post-apply discovery finds the resource) ----
 	execCtx = NewExecutionContext(ctx, nil, nil)
@@ -2758,8 +2763,8 @@ func TestResourceExecutor_DesireTransport_FullLifecycleFromEmptyStore(t *testing
 	assert.NoError(t, err, "DeleteDesire must exist (pending)")
 
 	// Simulate applier confirming deletion.
-	desireclient.MarkDeleteDesireConfirmed(t, ctx, store, testDesireID.Delete())
-	desireclient.MarkReadDesireNotFound(t, ctx, store, testDesireID.Read())
+	desiretest.MarkDeleteDesireConfirmed(t, ctx, store, testDesireID.Delete())
+	desiretest.MarkReadDesireNotFound(t, ctx, store, testDesireID.Read())
 
 	// ---- Event 4: delete (applier confirmed → cleanup removes all desires) ----
 	execCtx = NewExecutionContext(ctx, nil, nil)

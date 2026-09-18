@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/desireclient/desiretest"
 	"github.com/openshift-hyperfleet/hyperfleet-applier/pkg/desire"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +43,7 @@ func TestGetResource_SyncedReturnsMirroredObject(t *testing.T) {
 	store := newMemoryStore()
 	c := newTestClient(store)
 
-	PutSyncedReadDesire(t, ctx, store, testID.Read(), testOwner, configMapManifest(1))
+	desiretest.PutSyncedReadDesire(t, ctx, store, testID.Read(), testOwner, configMapManifest(1))
 
 	obj, err := c.GetResource(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.NoError(t, err)
@@ -55,7 +56,7 @@ func TestGetResource_ConfirmedNotFound(t *testing.T) {
 	store := newMemoryStore()
 	c := newTestClient(store)
 
-	PutConfirmedAbsentReadDesire(t, ctx, store, testID.Read(), testOwner)
+	desiretest.PutConfirmedAbsentReadDesire(t, ctx, store, testID.Read(), testOwner)
 
 	_, err := c.GetResource(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.Error(t, err)
@@ -68,7 +69,7 @@ func TestGetResource_InvalidReadDesire(t *testing.T) {
 	store := newMemoryStore()
 	c := newTestClient(store)
 
-	PutInvalidReadDesire(t, ctx, store, testID.Read(), testOwner)
+	desiretest.PutInvalidReadDesire(t, ctx, store, testID.Read(), testOwner)
 
 	_, err := c.GetResource(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.Error(t, err)
@@ -83,7 +84,7 @@ func TestGetResource_K8sAPIErrorWithRetainedMirrorReturnsStaleContent(t *testing
 	store := newMemoryStore()
 	c := newTestClient(store)
 
-	PutKubeAPIErrorReadDesire(t, ctx, store, testID.Read(), testOwner, configMapManifest(1))
+	desiretest.PutKubeAPIErrorReadDesire(t, ctx, store, testID.Read(), testOwner, configMapManifest(1))
 
 	obj, err := c.GetResource(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.NoError(t, err,
@@ -97,7 +98,7 @@ func TestGetResource_K8sAPIErrorWithNoMirrorYetIsNotSyncedYet(t *testing.T) {
 	store := newMemoryStore()
 	c := newTestClient(store)
 
-	PutKubeAPIErrorReadDesire(t, ctx, store, testID.Read(), testOwner, nil)
+	desiretest.PutKubeAPIErrorReadDesire(t, ctx, store, testID.Read(), testOwner, nil)
 
 	_, err := c.GetResource(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.Error(t, err)
@@ -152,30 +153,30 @@ func TestDecodeReadDesire(t *testing.T) {
 		},
 		{
 			name:        "successful true decodes content",
-			condition:   SuccessfulCondition(metav1.ConditionTrue, desire.ReasonSynced),
+			condition:   desiretest.SuccessfulCondition(metav1.ConditionTrue, desire.ReasonSynced),
 			content:     configMapManifest(1),
 			wantContent: true,
 		},
 		{
 			// ConditionTrue/ReasonNotFound is a shape the applier never reports; with no content it reads as not-synced-yet.
 			name:          "successful true with empty content is not synced yet",
-			condition:     SuccessfulCondition(metav1.ConditionTrue, desire.ReasonNotFound),
+			condition:     desiretest.SuccessfulCondition(metav1.ConditionTrue, desire.ReasonNotFound),
 			wantNotSynced: true,
 		},
 		{
 			name:         "false with notfound reason is confirmed absent",
-			condition:    SuccessfulCondition(metav1.ConditionFalse, desire.ReasonNotFound),
+			condition:    desiretest.SuccessfulCondition(metav1.ConditionFalse, desire.ReasonNotFound),
 			wantNotFound: true,
 		},
 		{
 			name:        "false with other reason decodes the retained mirror when present",
-			condition:   SuccessfulCondition(metav1.ConditionFalse, desire.ReasonKubeAPIError),
+			condition:   desiretest.SuccessfulCondition(metav1.ConditionFalse, desire.ReasonKubeAPIError),
 			content:     configMapManifest(1),
 			wantContent: true,
 		},
 		{
 			name:          "false with other reason and no retained mirror is not synced yet",
-			condition:     SuccessfulCondition(metav1.ConditionFalse, desire.ReasonKubeAPIError),
+			condition:     desiretest.SuccessfulCondition(metav1.ConditionFalse, desire.ReasonKubeAPIError),
 			wantNotSynced: true,
 		},
 	}

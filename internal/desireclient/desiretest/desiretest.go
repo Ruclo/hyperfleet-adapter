@@ -1,4 +1,4 @@
-package desireclient
+package desiretest
 
 import (
 	"context"

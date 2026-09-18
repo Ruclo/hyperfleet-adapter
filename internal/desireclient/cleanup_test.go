@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/openshift-hyperfleet/hyperfleet-adapter/internal/desireclient/desiretest"
 	"github.com/openshift-hyperfleet/hyperfleet-applier/pkg/desire"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,7 @@ func TestCleanupAfterDeletion_ConfirmedDelete_RemovesBoth(t *testing.T) {
 		Resource: testResource, Namespace: testNamespace, Name: testName,
 	}
 
-	PutConfirmedDeleteDesire(t, ctx, store, testID.Delete(), testOwner)
+	desiretest.PutConfirmedDeleteDesire(t, ctx, store, testID.Delete(), testOwner)
 
 	_, err := store.CreateReadDesire(ctx, desire.ReadDesire{
 		Identity: readID, Owner: testOwner, TargetVersion: "v1",
@@ -56,7 +57,8 @@ func TestCleanupAfterDeletion_PendingDelete_SkipsCleanup(t *testing.T) {
 		Resource: testResource, Namespace: testNamespace, Name: testName,
 	}
 
-	PutDeleteDesire(t, ctx, store, testID.Delete(), testOwner, metav1.ConditionFalse, desire.ReasonWaitingForDeletion)
+	desiretest.PutDeleteDesire(t, ctx, store, testID.Delete(), testOwner,
+		metav1.ConditionFalse, desire.ReasonWaitingForDeletion)
 
 	_, err := store.CreateReadDesire(ctx, desire.ReadDesire{
 		Identity: readID, Owner: testOwner, TargetVersion: "v1",
@@ -151,7 +153,7 @@ func TestCleanupAfterDeletion_DeleteDesireOnly_NoReadDesire(t *testing.T) {
 		Resource: testResource, Namespace: testNamespace, Name: testName,
 	}
 
-	PutConfirmedDeleteDesire(t, ctx, store, testID.Delete(), testOwner)
+	desiretest.PutConfirmedDeleteDesire(t, ctx, store, testID.Delete(), testOwner)
 
 	err := c.CleanupAfterDeletion(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.NoError(t, err)
@@ -182,7 +184,7 @@ func TestCleanupAfterDeletion_DeleteDeleteDesireError(t *testing.T) {
 	ctx := context.Background()
 	inner := newMemoryStore()
 
-	PutConfirmedDeleteDesire(t, ctx, inner, testID.Delete(), testOwner)
+	desiretest.PutConfirmedDeleteDesire(t, ctx, inner, testID.Delete(), testOwner)
 
 	store := &failingDeleteDeleteDesireStore{SpecStore: inner}
 	c := newTestClient(store)
