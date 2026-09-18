@@ -25,7 +25,7 @@ func TestCleanupAfterDeletion_ConfirmedDelete_RemovesBoth(t *testing.T) {
 		Resource: testResource, Namespace: testNamespace, Name: testName,
 	}
 
-	putConfirmedDeleteDesire(t, ctx, store)
+	PutConfirmedDeleteDesire(t, ctx, store, testID.Delete(), testOwner)
 
 	_, err := store.CreateReadDesire(ctx, desire.ReadDesire{
 		Identity: readID, Owner: testOwner, TargetVersion: "v1",
@@ -56,7 +56,7 @@ func TestCleanupAfterDeletion_PendingDelete_SkipsCleanup(t *testing.T) {
 		Resource: testResource, Namespace: testNamespace, Name: testName,
 	}
 
-	putDeleteDesire(t, ctx, store, metav1.ConditionFalse, desire.ReasonWaitingForDeletion)
+	PutDeleteDesire(t, ctx, store, testID.Delete(), testOwner, metav1.ConditionFalse, desire.ReasonWaitingForDeletion)
 
 	_, err := store.CreateReadDesire(ctx, desire.ReadDesire{
 		Identity: readID, Owner: testOwner, TargetVersion: "v1",
@@ -66,6 +66,7 @@ func TestCleanupAfterDeletion_PendingDelete_SkipsCleanup(t *testing.T) {
 	err = c.CleanupAfterDeletion(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.Error(t, err, "pending delete desire must return an error")
 	assert.Contains(t, err.Error(), "deletion not yet confirmed")
+	assert.True(t, errors.Is(err, ErrDeletionPending), "must wrap ErrDeletionPending")
 
 	_, err = store.GetDeleteDesire(ctx, deleteID)
 	assert.NoError(t, err, "delete desire must still exist")
@@ -104,6 +105,42 @@ func TestCleanupAfterDeletion_NoDesires_NoError(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestCleanupAfterDeletion_ApplyDesireExists_NoDeleteDesire_ReturnsError(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryStore()
+	c := newTestClient(store)
+
+	applyID := desire.Identity{
+		ManagementCluster: testManagementCluster, Type: desire.TypeApply,
+		Resource: testResource, Namespace: testNamespace, Name: testName,
+	}
+	_, err := store.CreateApplyDesire(ctx, desire.ApplyDesire{
+		Identity: applyID, Owner: testOwner,
+		Spec: desire.ApplySpec{KubeContent: configMapManifest(1)},
+	})
+	require.NoError(t, err)
+
+	readID := desire.Identity{
+		ManagementCluster: testManagementCluster, Type: desire.TypeRead,
+		Resource: testResource, Namespace: testNamespace, Name: testName,
+	}
+	_, err = store.CreateReadDesire(ctx, desire.ReadDesire{
+		Identity: readID, Owner: testOwner, TargetVersion: "v1",
+	})
+	require.NoError(t, err)
+
+	err = c.CleanupAfterDeletion(ctx, testGVK(), testNamespace, testName, testTransportContext())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "apply desire still exists")
+	assert.True(t, errors.Is(err, ErrDeletionPending), "must wrap ErrDeletionPending")
+
+	_, err = store.GetApplyDesire(ctx, applyID)
+	assert.NoError(t, err, "apply desire must still exist")
+
+	_, err = store.GetReadDesire(ctx, readID)
+	assert.NoError(t, err, "read desire must still exist")
+}
+
 func TestCleanupAfterDeletion_DeleteDesireOnly_NoReadDesire(t *testing.T) {
 	ctx := context.Background()
 	store := newMemoryStore()
@@ -114,7 +151,7 @@ func TestCleanupAfterDeletion_DeleteDesireOnly_NoReadDesire(t *testing.T) {
 		Resource: testResource, Namespace: testNamespace, Name: testName,
 	}
 
-	putConfirmedDeleteDesire(t, ctx, store)
+	PutConfirmedDeleteDesire(t, ctx, store, testID.Delete(), testOwner)
 
 	err := c.CleanupAfterDeletion(ctx, testGVK(), testNamespace, testName, testTransportContext())
 	require.NoError(t, err)
@@ -145,7 +182,7 @@ func TestCleanupAfterDeletion_DeleteDeleteDesireError(t *testing.T) {
 	ctx := context.Background()
 	inner := newMemoryStore()
 
-	putConfirmedDeleteDesire(t, ctx, inner)
+	PutConfirmedDeleteDesire(t, ctx, inner, testID.Delete(), testOwner)
 
 	store := &failingDeleteDeleteDesireStore{SpecStore: inner}
 	c := newTestClient(store)

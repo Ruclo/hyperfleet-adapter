@@ -72,6 +72,54 @@ func (f *failingCreateDeleteDesireStore) CreateDeleteDesire(
 	return desire.DeleteDesire{}, errors.New("boom: delete desire store unavailable")
 }
 
+var testID = TestIdentity{
+	ManagementCluster: testManagementCluster,
+	Resource:          testResource,
+	Namespace:         testNamespace,
+	Name:              testName,
+}
+
 func newMemoryStore() *memory.Store {
 	return memory.New()
+}
+
+// failingListReadDesiresStore wraps a real SpecStore but forces
+// ListReadDesires to fail, simulating a store-level outage during discovery.
+type failingListReadDesiresStore struct {
+	desire.SpecStore
+}
+
+func (f *failingListReadDesiresStore) ListReadDesires(
+	_ context.Context, _ string,
+) ([]desire.ReadDesire, error) {
+	return nil, errors.New("boom: read desire store unavailable")
+}
+
+// spyDeleteReadDesireStore counts DeleteReadDesire calls so tests can assert
+// whether ensureReadDesire actually attempted a recreate.
+type spyDeleteReadDesireStore struct {
+	desire.SpecStore
+	deleteReadDesireCalls int
+}
+
+func (s *spyDeleteReadDesireStore) DeleteReadDesire(
+	ctx context.Context, id desire.Identity, owner string, version int64,
+) error {
+	s.deleteReadDesireCalls++
+	return s.SpecStore.DeleteReadDesire(ctx, id, owner, version)
+}
+
+// staleApplyVersionStore wraps a real SpecStore but returns a stale version
+// on GetApplyDesire to simulate the case where an external client has
+// concurrently updated the apply desire while this one is computing.
+type staleApplyVersionStore struct {
+	desire.SpecStore
+}
+
+func (s *staleApplyVersionStore) GetApplyDesire(ctx context.Context, id desire.Identity) (desire.ApplyDesire, error) {
+	ad, err := s.SpecStore.GetApplyDesire(ctx, id)
+	if err == nil {
+		ad.Version++
+	}
+	return ad, err
 }
