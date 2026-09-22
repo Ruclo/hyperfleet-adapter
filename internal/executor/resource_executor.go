@@ -708,17 +708,13 @@ func (re *ResourceExecutor) executeResourceDelete(
 	// Step 1: Discover the existing resource
 	discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportClient, transportTarget)
 
-	isNotFound := discoverErr != nil && apierrors.IsNotFound(discoverErr)
+	isNotFound := discoverErr != nil &&
+		(apierrors.IsNotFound(discoverErr) || errors.Is(discoverErr, desireclient.ErrNotSyncedYet))
 	if discoverErr != nil && !isNotFound {
-		if errors.Is(discoverErr, desireclient.ErrNotSyncedYet) {
-			slog.WarnContext(ctx, "resource not synced yet, cannot discover for deletion",
-				"resource", resource.Name, "error", discoverErr)
-		} else {
-			re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
-		}
 		result.Status = StatusFailed
 		result.Error = discoverErr
 		re.recordResourceError(execCtx, resource, discoverErr)
+		re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
 		re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
 		return result, NewExecutorError(
 			PhaseResources, resource.Name, "failed to discover resource for deletion", discoverErr)
@@ -730,6 +726,8 @@ func (re *ResourceExecutor) executeResourceDelete(
 		// !resources.?X.hasValue() evaluates to true in this reconciliation.
 		execCtx.Resources[resource.Name] = nil
 
+		// Cleanup when discoverErr is ErrNotSyncedYet is safe because ErrDeletionPending is returned when
+		// the delete desire is still pending.
 		if err := re.tryCleanupDesires(ctx, resource, execCtx, transportClient, transportTarget, gvk); err != nil {
 			if errors.Is(err, desireclient.ErrDeletionPending) {
 				slog.WarnContext(ctx, "resource desire cleanup: deletion pending",
@@ -806,12 +804,17 @@ func (re *ResourceExecutor) executeResourceDelete(
 		execCtx.Resources[resource.Name] = nil
 		slog.DebugContext(ctx, "resource confirmed deleted (post-delete discovery: not found)", "resource", resource.Name)
 		if err := re.tryCleanupDesires(ctx, resource, execCtx, transportClient, transportTarget, gvk); err != nil {
-			slog.ErrorContext(ctx, "resource desire cleanup failed after delete",
-				"resource", resource.Name, "error", err)
+			if errors.Is(err, desireclient.ErrDeletionPending) {
+				slog.WarnContext(ctx, "resource desire cleanup: deletion pending",
+					"resource", resource.Name, "error", err)
+			} else {
+				slog.ErrorContext(ctx, "resource desire cleanup failed after delete",
+					"resource", resource.Name, "error", err)
+				re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
+			}
 			result.Status = StatusFailed
 			result.Error = err
 			re.recordResourceError(execCtx, resource, err)
-			re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
 			re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
 			return result, NewExecutorError(PhaseResources, resource.Name, "desire cleanup failed", err)
 		}
