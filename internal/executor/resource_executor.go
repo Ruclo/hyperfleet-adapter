@@ -737,6 +737,9 @@ func (re *ResourceExecutor) executeResourceDelete(
 					"resource", resource.Name, "error", err)
 				re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
 			}
+			// Record the error in the result and execution context so Health=False is reported
+			// since we cannot prevent Finalized=True without exposing a discovered resource in
+			// the context
 			result.Status = StatusFailed
 			result.Error = err
 			re.recordResourceError(execCtx, resource, err)
