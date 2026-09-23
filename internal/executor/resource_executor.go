@@ -802,21 +802,23 @@ func (re *ResourceExecutor) executeResourceDelete(
 	case postDeleteDiscovered == nil || postIsNotFound:
 		// Resource is confirmed gone: dependent resources can proceed in this reconciliation.
 		execCtx.Resources[resource.Name] = nil
-		slog.DebugContext(ctx, "resource confirmed deleted (post-delete discovery: not found)", "resource", resource.Name)
+		slog.DebugContext(ctx, "post-delete discovery: resource not found)", "resource", resource.Name)
 		if err := re.tryCleanupDesires(ctx, resource, execCtx, transportClient, transportTarget, gvk); err != nil {
-			if errors.Is(err, desireclient.ErrDeletionPending) {
-				slog.WarnContext(ctx, "resource desire cleanup: deletion pending",
-					"resource", resource.Name, "error", err)
-			} else {
+			if !errors.Is(err, desireclient.ErrDeletionPending) {
 				slog.ErrorContext(ctx, "resource desire cleanup failed after delete",
 					"resource", resource.Name, "error", err)
+				result.Status = StatusFailed
+				result.Error = err
+				re.recordResourceError(execCtx, resource, err)
 				re.metrics.RecordDeletion(resourceType, metrics.DeletionStatusError)
+				re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
+				return result, NewExecutorError(PhaseResources, resource.Name, "desire cleanup failed", err)
 			}
-			result.Status = StatusFailed
-			result.Error = err
-			re.recordResourceError(execCtx, resource, err)
-			re.metrics.ObserveDeletionDuration(resourceType, time.Since(startTime))
-			return result, NewExecutorError(PhaseResources, resource.Name, "desire cleanup failed", err)
+
+			// Deletion pending: leave the last known discovered state in context
+			execCtx.Resources[resource.Name] = discovered
+			slog.WarnContext(ctx, "resource desire cleanup: deletion pending",
+				"resource", resource.Name, "error", err)
 		}
 	default:
 		// Resource still present (finalizers or async deletion): dependents wait for next reconciliation.

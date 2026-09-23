@@ -199,3 +199,65 @@ func (ti TestIdentity) WithNamespace(namespace string) TestIdentity {
 	ti.Namespace = namespace
 	return ti
 }
+
+// InstantApplierStore wraps memory.Store. When a DeleteDesire is created it
+// immediately marks it Deleted and the paired ReadDesire as NotFound,
+// simulating an applier that confirms before post-delete discovery runs.
+type InstantApplierStore struct {
+	*memory.Store
+}
+
+func (s *InstantApplierStore) CreateDeleteDesire(
+	ctx context.Context, dd desire.DeleteDesire,
+) (desire.DeleteDesire, error) {
+	created, err := s.Store.CreateDeleteDesire(ctx, dd)
+	if err != nil {
+		return created, err
+	}
+	if _, err = s.UpdateDeleteDesireStatus(ctx, dd.Identity, desire.Status{
+		Conditions: []metav1.Condition{{
+			Type: desire.TypeSuccessful, Status: metav1.ConditionTrue, Reason: desire.ReasonDeleted,
+		}},
+	}, created.Version); err != nil {
+		return created, err
+	}
+
+	readID := dd.Identity
+	readID.Type = desire.TypeRead
+	if _, err = s.UpdateReadDesireStatus(ctx, readID, desire.ReadStatus{
+		Status: desire.Status{Conditions: []metav1.Condition{{
+			Type: desire.TypeSuccessful, Status: metav1.ConditionFalse, Reason: desire.ReasonNotFound,
+		}}},
+	}); err != nil {
+		return created, err
+	}
+	return created, nil
+}
+
+// PendingDeleteApplierStore wraps memory.Store. When a DeleteDesire is
+// created it marks the paired ReadDesire as NotFound (applier saw the
+// resource gone) but does NOT confirm the delete desire, simulating
+// an applier that is slow to ack the deletion.
+type PendingDeleteApplierStore struct {
+	*memory.Store
+}
+
+func (s *PendingDeleteApplierStore) CreateDeleteDesire(
+	ctx context.Context, dd desire.DeleteDesire,
+) (desire.DeleteDesire, error) {
+	created, err := s.Store.CreateDeleteDesire(ctx, dd)
+	if err != nil {
+		return created, err
+	}
+
+	readID := dd.Identity
+	readID.Type = desire.TypeRead
+	if _, err = s.UpdateReadDesireStatus(ctx, readID, desire.ReadStatus{
+		Status: desire.Status{Conditions: []metav1.Condition{{
+			Type: desire.TypeSuccessful, Status: metav1.ConditionFalse, Reason: desire.ReasonNotFound,
+		}}},
+	}); err != nil {
+		return created, err
+	}
+	return created, nil
+}
