@@ -235,6 +235,9 @@ func (re *ResourceExecutor) executeResource(
 		// The store refused a new ApplyDesire while a DeleteDesire is still
 		// unconfirmed. Desireclient already logged the retry warning. Failing
 		// the event would count an error and the next event is the retry.
+		// Pre-discovery may have recorded the mirrored object as present.
+		// This event did not apply, so record the resource as unsynced instead.
+		execCtx.ResourceStates[resource.Name] = ResourceStateUnsynced
 		result.OperationReason = applyDeletePendingReason
 		return result, nil
 	}

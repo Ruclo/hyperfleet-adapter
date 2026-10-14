@@ -88,6 +88,12 @@ func TestDesireDeleteThenReapply_WaitsForFinalizer(t *testing.T) {
 	require.Len(t, pending.ResourceResults, 1)
 	assert.Equal(t, "delete pending, retrying on next event", pending.ResourceResults[0].OperationReason)
 	assert.Nil(t, pending.ResourceResults[0].Error)
+	assert.Equal(t, executor.ResourceStateUnsynced, pending.ExecutionContext.ResourceStates["remoteConfig"])
+	mirrored, ok := pending.ExecutionContext.Resources["remoteConfig"].(*unstructured.Unstructured)
+	require.True(t, ok)
+	require.NotNil(t, mirrored)
+	assert.Equal(t, id.Name, mirrored.GetName())
+	assert.Nil(t, pending.ExecutionContext.Adapter.ExecutionError)
 
 	// Make sure the apply desire has not replaced the delete desire
 	_, err = store.GetDeleteDesire(ctx, id.Delete())

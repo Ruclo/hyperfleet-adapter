@@ -935,6 +935,8 @@ On a remote transport the adapter does not apply onto that object. While the del
 ApplyResource: delete pending, retrying on next event
 ```
 
+For that event the resource's `resource_states` entry is `unsynced`, and the mirrored object stays in resources.
+
 **Dependency ordering.** When resources must be deleted in a specific order, gate the parent's delete on the child being confirmed gone with `resource_states.?X.orValue("") == "confirmed_deleted"`. This also keeps an unsynced remote mirror from looking like confirmed absence:
 
 ```yaml

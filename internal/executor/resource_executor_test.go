@@ -3297,6 +3297,8 @@ func TestResourceExecutor_DesireTransport_ReapplyWhileDeletePending(t *testing.T
 	assert.Equal(t, applyDeletePendingReason, results[0].OperationReason)
 	assert.Nil(t, results[0].Error)
 	assert.Nil(t, execCtx.Adapter.ExecutionError)
+	assert.Equal(t, ResourceStateUnsynced, execCtx.ResourceStates["test-resource"])
+	assert.Nil(t, execCtx.Resources["test-resource"])
 
 	assert.Contains(t, logs.String(), "level=WARN")
 	assert.Contains(t, logs.String(), "ApplyResource: delete pending, retrying on next event")
